@@ -1,5 +1,10 @@
 # Global Tropical Cyclones Impact Model
 
+TODO: Update readme.md file
+TODO: Add readme.md files to each datasource in ```src_global```
+
+
+
 ## Development
 
 All code is formatted according to black and flake8 guidelines.
