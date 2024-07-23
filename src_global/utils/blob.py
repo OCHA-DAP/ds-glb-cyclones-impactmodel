@@ -20,7 +20,6 @@ prod_container_client = ""
 
 # Dev client
 DEV_BLOB_SAS = os.getenv("DEV_BLOB_SAS")
-# DEV_BLOB_SAS="sv=2020-02-10&st=2024-06-03T13%3A00%3A54Z&se=2034-06-01T13%3A00%3A00Z&s$"
 
 DEV_BLOB_BASE_URL = "https://imb0chd0dev.blob.core.windows.net/"
 DEV_BLOB_PROJ_BASE_URL = DEV_BLOB_BASE_URL + "isi"
@@ -28,7 +27,6 @@ DEV_BLOB_PROJ_URL = DEV_BLOB_PROJ_BASE_URL + "?" + DEV_BLOB_SAS
 dev_container_client = ContainerClient.from_container_url(DEV_BLOB_PROJ_URL)
 
 PROJECT_PREFIX = "global_model"
-
 
 def upload_gdf_to_blob(
     gdf, blob_name, prod_dev: Literal["prod", "dev"] = "dev"
