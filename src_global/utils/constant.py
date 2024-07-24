@@ -53,3 +53,6 @@ iso3_list = [
     "CAN",
     "NZL",
 ]
+
+# For SRTM tiles
+srtm_url = "https://srtm.csi.cgiar.org/wp-content/uploads/files/srtm_5x5/TIFF/"

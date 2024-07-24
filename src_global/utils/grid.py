@@ -129,6 +129,19 @@ def create_grid(shp, iso3):
         grid_muni_total,
     )
 
+# For uploading large files to the blob
+def upload_in_chunks(dataframe, chunk_size, blob, blob_name_template, project_prefix=PROJECT_PREFIX, folder="GRID"):
+    num_chunks = len(dataframe) // chunk_size + 1
+    for i in range(num_chunks):
+        chunk = dataframe[i*chunk_size:(i+1)*chunk_size]
+        if not chunk.empty:
+            buffer = io.StringIO()
+            chunk.to_csv(buffer, index=False)
+            buffer.seek(0)
+            chunk_blob_name = f"{project_prefix}/{folder}/{blob_name_template}_part_{i+1}.csv"
+            blob.upload_blob_data(blob_name=chunk_blob_name, data=buffer.getvalue(), prod_dev="dev")
+            print(f"Uploaded {chunk_blob_name}")
+
 
 def iterate_grid_creation():
     # Load global shapefile
@@ -178,13 +191,13 @@ def iterate_grid_creation():
 
     # Save datasets
     datasets = {
-        "GRID/output/global_0.1_degree_grid.gpkg": grid_total,
-        "GRID/output/global_0.1_degree_grid_centroids.gpkg": grid_centroids_total,
-        "GRID/output/global_0.1_degree_grid_land_overlap.gpkg": grid_land_overlap_total,
-        "GRID/output/global_0.1_degree_grid_centroids_land_overlap.gpkg": grid_land_overlap_centroids_total,
+        "GRID/global_0.1_degree_grid.gpkg": grid_total,
+        "GRID/global_0.1_degree_grid_centroids.gpkg": grid_centroids_total,
+        "GRID/global_0.1_degree_grid_land_overlap.gpkg": grid_land_overlap_total,
+        "GRID/global_0.1_degree_grid_centroids_land_overlap.gpkg": grid_land_overlap_centroids_total,
     }
 
-    csv_datasets = {"GRID/input/grid_municipality_info.csv": grid_muni_total}
+    csv_datasets = {"GRID/grid_municipality_info.csv": grid_muni_total}
 
     # Create a temporary directory for saving files
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -203,20 +216,10 @@ def iterate_grid_creation():
                     blob_name=blob_name, data=data, prod_dev="dev"
                 )
 
-        # Save and upload CSV dataset
-        for filename, df in csv_datasets.items():
-            local_file_path = (
-                temp_dir_path / filename.split("/")[-1]
-            )  # Save in temp_dir with filename only
-            df.to_csv(local_file_path, index=False)
-            blob_name = f"{PROJECT_PREFIX}/{filename}"
-
-            with open(local_file_path, "rb") as file:
-                data = file.read()
-                blob.upload_blob_data(
-                    blob_name=blob_name, data=data, prod_dev="dev"
-                )
-
+        # Save and upload CSV dataset (in chunks)
+        chunk_size = 100000  # Adjust chunk size as necessary
+        blob_name_template = "grid_municipality_info"
+        upload_in_chunks(grid_muni_total, chunk_size, blob, blob_name_template, folder="GRID")
 
 if __name__ == "__main__":
     # Define grid level for every country available in the impact data
