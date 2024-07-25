@@ -9,9 +9,9 @@ from typing import Literal
 
 import geopandas as gpd
 import pandas as pd
-from rasterio.io import MemoryFile
 from azure.storage.blob import ContainerClient
 from dotenv import load_dotenv
+from rasterio.io import MemoryFile
 
 load_dotenv()
 
@@ -66,6 +66,7 @@ PROJECT_PREFIX = "global_model"
 #         gdf = gpd.read_file(f"temp/{shapefile}")
 #     return gdf
 
+
 # To load data
 def load_blob_data(blob_name, prod_dev: Literal["prod", "dev"] = "dev"):
     if prod_dev == "dev":
@@ -75,6 +76,7 @@ def load_blob_data(blob_name, prod_dev: Literal["prod", "dev"] = "dev"):
     blob_client = container_client.get_blob_client(blob_name)
     data = blob_client.download_blob().readall()
     return data
+
 
 # To upload data
 def upload_blob_data(
@@ -87,7 +89,8 @@ def upload_blob_data(
     blob_client = container_client.get_blob_client(blob_name)
     blob_client.upload_blob(data, overwrite=True)
 
-# List all files into blob 
+
+# List all files into blob
 def list_container_blobs(
     name_starts_with=None, prod_dev: Literal["prod", "dev"] = "dev"
 ):
@@ -101,6 +104,7 @@ def list_container_blobs(
             name_starts_with=name_starts_with,
         )
     ]
+
 
 # For loading gpkg files
 def load_gpkg(name):
@@ -186,6 +190,7 @@ def load_gpkg(name):
 #         )
 #     )
 
+
 # For loading csv files
 def load_csv(csv_path):
     return pd.read_csv(BytesIO(load_blob_data(csv_path)))
@@ -201,7 +206,7 @@ def upload_tif_to_blob(file_path, blob_name):
 # Function to load tif from blob
 def load_tif_from_blob(blob_name):
     data = load_blob_data(blob_name)
-    
+
     # Check if data is retrieved correctly
     if not data:
         raise ValueError("No data retrieved from blob")
@@ -216,6 +221,7 @@ def load_tif_from_blob(blob_name):
     print(dataset.profile)  # Example: print the metadata
     return dataset
 
+
 # For deleting blob files
 def delete_blob_data(blob_name, prod_dev: Literal["prod", "dev"] = "dev"):
     if prod_dev == "dev":
@@ -225,6 +231,7 @@ def delete_blob_data(blob_name, prod_dev: Literal["prod", "dev"] = "dev"):
     blob_client = container_client.get_blob_client(blob_name)
     blob_client.delete_blob()
 
+
 # For uploading to blob in chunks (for large files)
 def upload_in_chunks(
     dataframe,
@@ -232,7 +239,7 @@ def upload_in_chunks(
     blob,
     blob_name_template,
     folder,
-    project_prefix="global_model"
+    project_prefix="global_model",
 ):
     num_chunks = len(dataframe) // chunk_size + 1
     for i in range(num_chunks):
@@ -248,3 +255,38 @@ def upload_in_chunks(
                 prod_dev="dev",
             )
             print(f"Uploaded {chunk_blob_name}")
+
+# Functions to load specific datasets
+def get_municipality_info():
+    # Load municipality info datasets (is in chunks)
+    filenames = [f"grid_municipality_info_part_{i}.csv" for i in range(1,12)]
+    dataframes = []
+    for filename in filenames:
+        csv_path = f"{PROJECT_PREFIX}/GRID/{filename}"
+        df = load_csv(csv_path=csv_path)
+        dataframes.append(df)
+    global_ids_mun = pd.concat(dataframes, ignore_index=True)
+    return global_ids_mun
+
+def get_population_data():
+    # Load population dataset (is in chunks)
+    filenames = [f"pop_grid_global_part_{i}.csv" for i in range(1,12)]
+    dataframes = []
+    for filename in filenames:
+        csv_path = f"{PROJECT_PREFIX}/WORLDPOP/processed_pop/{filename}"
+        df = load_csv(csv_path=csv_path)
+        dataframes.append(df)
+    global_pop = pd.concat(dataframes, ignore_index=True)
+    return global_pop
+
+def get_impact_data():
+    # Load impact data (is in chunks)
+    filenames = [f"impact_data_part_{i}.csv" for i in range(1,7)]
+    dataframes = []
+    for filename in filenames:
+        csv_path = f"{PROJECT_PREFIX}/EMDAT/{filename}"
+        df = load_csv(csv_path=csv_path)
+        dataframes.append(df)
+    impact_global = pd.concat(dataframes, ignore_index=True)
+    return impact_global
+

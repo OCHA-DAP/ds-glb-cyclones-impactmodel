@@ -129,17 +129,29 @@ def create_grid(shp, iso3):
         grid_muni_total,
     )
 
+
 # For uploading large files to the blob
-def upload_in_chunks(dataframe, chunk_size, blob, blob_name_template, project_prefix=PROJECT_PREFIX, folder="GRID"):
+def upload_in_chunks(
+    dataframe,
+    chunk_size,
+    blob,
+    blob_name_template,
+    project_prefix=PROJECT_PREFIX,
+    folder="GRID",
+):
     num_chunks = len(dataframe) // chunk_size + 1
     for i in range(num_chunks):
-        chunk = dataframe[i*chunk_size:(i+1)*chunk_size]
+        chunk = dataframe[i * chunk_size : (i + 1) * chunk_size]
         if not chunk.empty:
             buffer = io.StringIO()
             chunk.to_csv(buffer, index=False)
             buffer.seek(0)
             chunk_blob_name = f"{project_prefix}/{folder}/{blob_name_template}_part_{i+1}.csv"
-            blob.upload_blob_data(blob_name=chunk_blob_name, data=buffer.getvalue(), prod_dev="dev")
+            blob.upload_blob_data(
+                blob_name=chunk_blob_name,
+                data=buffer.getvalue(),
+                prod_dev="dev",
+            )
             print(f"Uploaded {chunk_blob_name}")
 
 
@@ -219,7 +231,14 @@ def iterate_grid_creation():
         # Save and upload CSV dataset (in chunks)
         chunk_size = 100000  # Adjust chunk size as necessary
         blob_name_template = "grid_municipality_info"
-        upload_in_chunks(grid_muni_total, chunk_size, blob, blob_name_template, folder="GRID")
+        upload_in_chunks(
+            grid_muni_total,
+            chunk_size,
+            blob,
+            blob_name_template,
+            folder="GRID",
+        )
+
 
 if __name__ == "__main__":
     # Define grid level for every country available in the impact data

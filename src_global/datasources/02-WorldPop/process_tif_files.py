@@ -6,10 +6,11 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import rasterio
-from rasterio.mask import mask
 from rasterio.io import MemoryFile
+from rasterio.mask import mask
 
 from src_global.utils import blob, constant
+
 
 # Function to calculate the sum of population for a given geometry
 def calculate_population(geometry, raster, transform):
@@ -65,11 +66,12 @@ def iterate_pop_to_grid(iso3_list, grid_global):
 
     # Assuming impact_data is your DataFrame
     blob.upload_in_chunks(
-        dataframe=df_pop_global, 
-        chunk_size=chunk_size, 
-        blob=blob, 
+        dataframe=df_pop_global,
+        chunk_size=chunk_size,
+        blob=blob,
         folder="WORLDPOP/processed_pop",
-        blob_name_template=blob_name_template)
+        blob_name_template=blob_name_template,
+    )
 
 
 if __name__ == "__main__":

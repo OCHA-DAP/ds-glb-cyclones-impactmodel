@@ -56,3 +56,6 @@ iso3_list = [
 
 # For SRTM tiles
 srtm_url = "https://srtm.csi.cgiar.org/wp-content/uploads/files/srtm_5x5/TIFF/"
+
+# Project folder name
+PROJECT_PREFIX = 'global_model'
