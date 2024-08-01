@@ -2,6 +2,7 @@
 import io
 import os
 import tempfile
+import ast
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -13,38 +14,11 @@ from src_global.utils import blob
 PROJECT_PREFIX = "global_model"
 
 
-def upload_in_chunks(
-    dataframe,
-    chunk_size,
-    blob,
-    blob_name_template,
-    project_prefix=PROJECT_PREFIX,
-):
-    num_chunks = len(dataframe) // chunk_size + 1
-    for i in range(num_chunks):
-        chunk = dataframe[i * chunk_size : (i + 1) * chunk_size]
-        if not chunk.empty:
-            buffer = io.StringIO()
-            chunk.to_csv(buffer, index=False)
-            buffer.seek(0)
-            chunk_blob_name = (
-                f"{project_prefix}/EMDAT/{blob_name_template}_part_{i+1}.csv"
-            )
-            blob.upload_blob_data(
-                blob_name=chunk_blob_name,
-                data=buffer.getvalue(),
-                prod_dev="dev",
-            )
-            print(f"Uploaded {chunk_blob_name}")
-
-
+# Function to load and clean emdat dataset
 def clean_emdat():
-    # Load emdat database and geolocated emdat
+    # Load emdat database
     impact_data = blob.load_csv(
         csv_path=f"{PROJECT_PREFIX}/EMDAT/emdat-tropicalcyclone-2000-2022-processed-sids.csv"
-    )
-    geo_data = blob.load_csv(
-        csv_path=f"{PROJECT_PREFIX}/EMDAT/pend-gdis-1960-2018-disasterlocations.csv"
     )
 
     impact_data_global = (
@@ -65,29 +39,157 @@ def clean_emdat():
         .reset_index(drop=True)
     )
 
-    # Clean & Merge
-    impact_data_global["disasterno"] = impact_data_global["DisNo."].apply(
-        lambda x: x[:-4]
-    )
-    impact_merged = geo_data[
-        ["disasterno", "iso3", "latitude", "longitude"]
-    ].merge(impact_data_global, on=["disasterno", "iso3"])
-    return impact_merged
+    return impact_data_global
+
+# Fuction to propertly create the "affected regions" column
+def get_item(x):
+    try: 
+        list_locations = ast.literal_eval(x)
+        adm1_pcodes = []
+        adm2_pcodes = []
+        adm1 = False
+        adm2 = False
+        
+        for el in list_locations:
+            try:
+                adm1_pcode = el['adm1_code']
+                adm1_pcodes.append(adm1_pcode)
+                adm1 = True
+            except KeyError:
+                adm2_pcode = el['adm2_code']
+                adm2_pcodes.append(adm2_pcode)
+                adm2 = True
+        
+        if adm1:
+            level = 'ADM1'
+            return {'level': level, 'affected_regions': adm1_pcodes}
+        elif adm2:
+            level = 'ADM2'
+            return {'level': level, 'affected_regions': adm2_pcodes}
+    except:
+        level='ADM0'
+        return {'level': level, 'affected_regions': []}
+    
+# Fuction to propertly explode the emdata databaset on the "affected regions" column
+def process_impact_data(guil_shp, impact_data):
+    """For the ADM1 level events"""
+
+    # Explode impact data
+    adm1_impact_exploded = impact_data[impact_data.level == 'ADM1'].explode('regions_affected').reset_index(drop=True)
+    # Add geometry feature by merging with gaul2015 shapefile
+    adm1_impact_complete = guil_shp.merge(adm1_impact_exploded, 
+                left_on='ADM1_CODE', right_on='regions_affected',
+                how='right')[
+                    adm1_impact_exploded.columns.to_list() + 
+                    ['ADM1_CODE', 'ADM2_CODE', 'ADM0_NAME', 'geometry']
+                    ].drop('regions_affected', axis=1)#.drop_duplicates(['sid', 'ADM1_CODE'])
+    adm1_impact_complete = gpd.GeoDataFrame(adm1_impact_complete, geometry='geometry')
+
+    # Calculate centroids of the geometries in adm2_impact_complete
+    adm1_impact_complete['centroid'] = adm1_impact_complete.geometry.centroid
+
+    """For the ADM2 level events"""
+    # Explode impact data
+    adm2_impact_exploded = impact_data[impact_data.level == 'ADM2'].explode('regions_affected')
+    # Add geometry feature by merging with gaul2015 shapefile
+    adm2_impact_complete = guil_shp.merge(adm2_impact_exploded, 
+                                    left_on='ADM2_CODE', right_on='regions_affected',
+                                    how='right')[
+                                        adm2_impact_exploded.columns.to_list() + 
+                                        ['ADM1_CODE', 'ADM2_CODE', 'ADM0_NAME', 'geometry']
+                                        ].drop('regions_affected', axis=1)
+    adm2_impact_complete = gpd.GeoDataFrame(adm2_impact_complete, geometry='geometry')
+
+    # Calculate centroids of the geometries in adm2_impact_complete
+    adm2_impact_complete['centroid'] = adm2_impact_complete.geometry.centroid
+
+    """For the ADM0 level events"""
+    adm0_impact_complete = impact_data[impact_data.level == 'ADM0']
+
+    # Concatenate
+    impact_data_complete_geo = pd.concat([adm1_impact_complete, adm2_impact_complete, adm0_impact_complete])
+    # Clean
+    impact_data_complete_geo = impact_data_complete_geo.drop(
+        ['ADM1_CODE', 'ADM2_CODE', 'ADM0_NAME', 'geometry', 'regions_affected'], 
+        axis=1)
+    impact_data_complete_geo = impact_data_complete_geo.rename({'centroid':'geometry'}, axis=1)
+
+    return impact_data_complete_geo
+
+# Function to manually add missing sid when it's possible
+def add_missing_sid(df_impact):
+    # Manually create list of sid's
+    missing_sid_subset = df_impact[df_impact.sid.isna()][['Event Name', 'DisNo.', 'Start Year', 'GID_0']].drop_duplicates()
+    # I want at least to have an EVENT NAME
+    missing_sid_subset = missing_sid_subset.dropna(subset='Event Name').reset_index(drop=True)
+    # Create list by going into https://ncics.org/ibtracs/index.php?
+    missing_sid_list = [
+        "2022295N13093",#Sitrang
+        "2022254N24143",#Nanmadol
+        "2022020S13059",#Ana
+        "2022025S11091",#Batsirai
+        "2022042S12063",#Dumako
+        "2022047S15073",#Emnati
+        "2022020S13059",#Ana
+        "2022042S12063",#Dumako
+        None,#Ineng
+        "2022099N11128",#Megi
+        "2022232N18131",#Ma-on
+        "2022285N17140",#Nesat
+        "2022285N12116",#Sonca
+        "2022338N05100",#Mandous
+        "2022065S16055",#Gombe
+        "2022110S12051",#Jasmine
+        "2022020S13059",#Ana
+        None,#Winnie
+        "2022008S17173",#Cody
+        "2022180N15130",#Aere
+        "2022263N18137",#Talas
+        "2022239N22150",#Hinnamnor
+        "2022065S16055",#Gombe
+        "2022025S11091",#Batsirai
+        "2022299N11134",#Nalgae
+        "2022285N17140",#Nesat
+        "2022020S13059"#Ana
+    ]
+    # Updated Dataframe of missing ones
+    missing_sid_subset['sid'] = missing_sid_list
+    missing_sid_subset = missing_sid_subset[['DisNo.', 'sid']].dropna()
+    
+    # Merge to get the missing sid values
+    merge_sid = df_impact.merge(missing_sid_subset, on='DisNo.', how='left', suffixes=('', '_missing'))
+    # Fill the NaN values in the sid column with the corresponding values from the merged DataFrame
+    merge_sid['sid'] = merge_sid['sid'].fillna(merge_sid['sid_missing'])
+    # Drop the temporary 'sid_missing' column
+    df_impact_complete_fixed = merge_sid.drop(columns=['sid_missing'])
+    # Drop all the rows with no sid column --> no TC matching is a no-go
+    df_impact_complete_fixed = df_impact_complete_fixed.dropna(subset='sid').reset_index(drop=True)
+    return df_impact_complete_fixed
 
 
+# Function to geolocate the emdat database (GID codes by GDAM shapefile)
 def geolocate_impact(impact_data):
-    # Load shp
+    # Load GADM shp
     global_shp = blob.load_gpkg(
         name=f"{PROJECT_PREFIX}/SHP/global_shapefile_GID_adm2.gpkg"
     )
+    # Load GUIL shp
+    guil_shp = blob.load_gpkg(
+        name=f"{PROJECT_PREFIX}/SHP/global_shapefile_GUIL_adm2.gpkg"
+    )
+    guil_shp = guil_shp[['ADM2_CODE', 'ADM1_CODE', 'ADM0_NAME', 'geometry']]
+
+    # Create "affected regions" column
+    impact_data[['level', 'regions_affected']] = impact_data['Admin Units'].apply(lambda x: pd.Series(get_item(x)))
+    impact_data = impact_data.drop(columns='Admin Units')
+    # Explode on this column
+    impact_data_complete_geo = process_impact_data(guil_shp, impact_data)
 
     # Create geometry column
     geo_impact_data = gpd.GeoDataFrame(
-        impact_data,
-        geometry=gpd.points_from_xy(
-            impact_data.longitude, impact_data.latitude
-        ),
-    )
+        impact_data_complete_geo, 
+        geometry='geometry'
+        )
 
     # Set the CRS for geo_impact_data if not already set
     geo_impact_data.set_crs(
@@ -97,15 +199,16 @@ def geolocate_impact(impact_data):
     # Ensure both GeoDataFrames use the same CRS
     geo_impact_data.to_crs(global_shp.crs, inplace=True)
 
-    # # Ensure both GeoDataFrames use the same CRS
-    # geo_impact_data = geo_impact_data.to_crs(agg_df_shp.crs)
+    # We have 2 cases
+    geo_impact_data_adm0 = geo_impact_data[geo_impact_data.level == 'ADM0']
+    geo_impact_data_subnational = geo_impact_data[geo_impact_data.level != 'ADM0']
 
     # Add 2nd geometry column
     global_shp["shp_geometry"] = global_shp["geometry"]
 
     # Merge with shapefile
     merged_gdf = gpd.sjoin(
-        geo_impact_data, global_shp, how="left", op="within"
+        geo_impact_data_subnational, global_shp, how="left", op="within"
     )
 
     # Identify points that were not matched
@@ -141,10 +244,10 @@ def geolocate_impact(impact_data):
     merged_gdf["geometry"] = merged_gdf["shp_geometry"]
     merged_gdf = merged_gdf.drop(["shp_geometry", "index_right"], axis=1)
 
-    # Add level of impact
-    merged_gdf["level"] = merged_gdf["Admin Units"].apply(
-        lambda x: str(x)[3:7]
-    )
+    # Add adm0 impact
+    merged_gdf = pd.concat([merged_gdf, geo_impact_data_adm0])
+    # adm0 events dont have gid0 info, but this is esentially the iso3
+    merged_gdf['GID_0'] = merged_gdf['GID_0'].fillna(merged_gdf.iso3)
 
     # Create "reduced" dataset with only relevant information
     reduced_impact_dataset = merged_gdf[
@@ -155,7 +258,7 @@ def geolocate_impact(impact_data):
             "Total Affected",
             "level",
             "Start Year",
-            "Country",
+            # "Country",
             "GID_0",
             "GID_1",
             "GID_2",
@@ -182,6 +285,11 @@ def geolocate_impact(impact_data):
             reduced_merged = pd.merge(
                 df_event, df_loc, on=["GID_0", "GID_1", "GID_2"], how="right"
             )
+        elif level == 'ADM0':
+            df_event = df_event.drop(['GID_1', 'GID_2'], axis=1)
+            reduced_merged = pd.merge(
+                df_event, df_loc, on=['GID_0'], how='right'
+            )
 
         # Sort values for ffill
         reduced_merged = reduced_merged.sort_values(
@@ -193,7 +301,7 @@ def geolocate_impact(impact_data):
         reduced_merged["Start Year"] = reduced_merged["Start Year"].ffill()
         reduced_merged["Event Name"] = reduced_merged["Event Name"].ffill()
         reduced_merged["level"] = reduced_merged["level"].ffill()
-        reduced_merged["Country"] = reduced_merged["Country"].ffill()
+        # reduced_merged["Country"] = reduced_merged["Country"].ffill()
         reduced_merged["Total Affected"].fillna(
             0, inplace=True
         )  # Fill 'Total Affected' with 0
@@ -202,12 +310,22 @@ def geolocate_impact(impact_data):
             ["GID_1", "GID_2"]
         )
         df_impact_complete = pd.concat([df_impact_complete, reduced_merged])
+    # Reset index
+    df_impact_complete = df_impact_complete.reset_index(drop=True)
+    # Add missing sid data
+    df_impact_complete_fixed = add_missing_sid(df_impact_complete)
+
 
     # Save results
-
     chunk_size = 100000  # Adjust chunk size as necessary
     blob_name_template = "impact_data"
-    upload_in_chunks(df_impact_complete, chunk_size, blob, blob_name_template)
+    blob.upload_in_chunks(
+        dataframe=df_impact_complete_fixed,
+        chunk_size=chunk_size,
+        blob=blob,
+        blob_name_template=blob_name_template,
+        folder="EMDAT"
+    )
 
 
 if __name__ == "__main__":

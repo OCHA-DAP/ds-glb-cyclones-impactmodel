@@ -11,6 +11,26 @@ from src_global.utils import blob
 
 PROJECT_PREFIX = "global_model"
 
+# Function to group dataset on specific level
+def group_shp(global_shp_red):
+
+    # Group by the level
+    grouped = global_shp_red.groupby(['GID_0','GID_1','GID_2'])
+
+    # Aggregate geometries using unary_union
+    agg_geometries = grouped["geometry"].agg(lambda x: x.unary_union)
+
+    # Create a new GeoDataFrame with the aggregated geometries
+    agg_df = gpd.GeoDataFrame(agg_geometries, geometry="geometry")
+
+    # Reset index to get level as a column again
+    agg_df.reset_index(inplace=True)
+
+    # To GPD
+    agg_df_shp = gpd.GeoDataFrame(agg_df, geometry="geometry")
+    return agg_df_shp
+
+
 
 def create_adm2_shp():
     # Load data
@@ -25,29 +45,16 @@ def create_adm2_shp():
         ["GID_0", "GID_1", "GID_2", "GID_3", "GID_4", "GID_5", "geometry"]
     ]
     global_shp_red = global_shp_red[global_shp_red["GID_0"].isin(iso3_list)]
-
-    # Group by the GID_2 level
-    grouped = global_shp_red.groupby("GID_2")
-
-    # Aggregate geometries using unary_union
-    agg_geometries = grouped["geometry"].agg(lambda x: x.unary_union)
-
-    # Create a new GeoDataFrame with the aggregated geometries
-    agg_df = gpd.GeoDataFrame(agg_geometries, geometry="geometry")
-
-    # Reset index to get GID_2 as a column again
-    agg_df.reset_index(inplace=True)
-
-    # Optionally, you can keep other relevant columns (e.g., GID_0, GID_1)
-    # If you want to keep the first occurrence of these columns:
-    agg_df = (
-        grouped.first()
-        .reset_index()[["GID_0", "GID_1", "GID_2"]]
-        .merge(agg_df, on="GID_2")
-    )
-
-    # Save file
-    agg_df_shp = gpd.GeoDataFrame(agg_df, geometry="geometry")
+    
+    # Group to level 2 (if possible)
+    agg_df_shp_adm2 = group_shp(global_shp_red[global_shp_red.GID_2 != ''])
+    # For the missing data (countries with no adm2 data), keep the level 1 info
+    agg_df_shp_adm1 = global_shp_red[global_shp_red.GID_2 == ''][
+        ['GID_0', 'GID_1', 'GID_2', 'geometry']].reset_index()
+    # Concatenate
+    agg_df_shp = pd.concat(
+        [agg_df_shp_adm1, agg_df_shp_adm2]
+        ).reset_index(drop=True)
 
     datasets = {
         "/SHP/global_shapefile_GID_adm2.gpkg": agg_df_shp,

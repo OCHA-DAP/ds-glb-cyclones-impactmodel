@@ -97,7 +97,9 @@ def download_tiles(
                         ) as temp_file:
                             temp_file.write(content)
                             temp_file_path = temp_file.name
-                            blob_name = f"{PROJECT_PREFIX}/SRTM/{iso3}/{fileName}"
+                            blob_name = (
+                                f"{PROJECT_PREFIX}/SRTM/{iso3}/{fileName}"
+                            )
                             # Check if file is already on blob
                             check = len(
                                 blob.list_container_blobs(
@@ -112,10 +114,11 @@ def download_tiles(
                             else:
                                 # print(f"Uploading {fileName} to {iso3} folder")
                                 blob.upload_tif_to_blob(
-                                    file_path=temp_file_path, blob_name=blob_name
+                                    file_path=temp_file_path,
+                                    blob_name=blob_name,
                                 )
         except:
-            #Ocean tile
+            # Ocean tile
             pass
 
 

@@ -29,44 +29,6 @@ dev_container_client = ContainerClient.from_container_url(DEV_BLOB_PROJ_URL)
 
 PROJECT_PREFIX = "global_model"
 
-
-# def upload_gdf_to_blob(
-#     gdf, blob_name, prod_dev: Literal["prod", "dev"] = "dev"
-# ):
-#     with tempfile.TemporaryDirectory() as temp_dir:
-#         # File paths for shapefile components within the temp directory
-#         shp_base_path = os.path.join(temp_dir, "data")
-
-#         gdf.to_file(shp_base_path, driver="ESRI Shapefile")
-
-#         zip_file_path = os.path.join(temp_dir, "data")
-
-#         shutil.make_archive(
-#             base_name=zip_file_path, format="zip", root_dir=temp_dir
-#         )
-
-#         # Define the full path to the zip file
-#         full_zip_path = f"{zip_file_path}.zip"
-
-#         # Upload the buffer content as a blob
-#         with open(full_zip_path, "rb") as data:
-#             upload_blob_data(blob_name, data, prod_dev=prod_dev)
-
-
-# def load_gdf_from_blob(
-#     blob_name, shapefile: str = None, prod_dev: Literal["prod", "dev"] = "dev"
-# ):
-#     blob_data = load_blob_data(blob_name, prod_dev=prod_dev)
-#     with zipfile.ZipFile(io.BytesIO(blob_data), "r") as zip_ref:
-#         zip_ref.extractall("temp")
-#         if shapefile is None:
-#             shapefile = [f for f in zip_ref.namelist() if f.endswith(".shp")][
-#                 0
-#             ]
-#         gdf = gpd.read_file(f"temp/{shapefile}")
-#     return gdf
-
-
 # To load data
 def load_blob_data(blob_name, prod_dev: Literal["prod", "dev"] = "dev"):
     if prod_dev == "dev":
@@ -109,87 +71,6 @@ def list_container_blobs(
 # For loading gpkg files
 def load_gpkg(name):
     return gpd.read_file(BytesIO(load_blob_data(name)))
-
-
-# def load_grid(complete=False):
-#     if complete:
-#         return gpd.read_file(
-#             BytesIO(
-#                 load_blob_data(
-#                     PROJECT_PREFIX
-#                     + "/grid/output_dir/hti_0.1_degree_grid.gpkg"
-#                 )
-#             )
-#         )
-#     else:
-#         return gpd.read_file(
-#             BytesIO(
-#                 load_blob_data(
-#                     PROJECT_PREFIX
-#                     + "/grid/output_dir/hti_0.1_degree_grid_land_overlap.gpkg"
-#                 )
-#             )
-#         )
-
-
-# def load_grid_centroids(complete=False):
-#     if complete:
-#         return gpd.read_file(
-#             BytesIO(
-#                 load_blob_data(
-#                     PROJECT_PREFIX
-#                     + "/grid/output_dir/hti_0.1_degree_grid_centroids.gpkg"
-#                 )
-#             )
-#         )
-#     else:
-#         return gpd.read_file(
-#             BytesIO(
-#                 load_blob_data(
-#                     PROJECT_PREFIX
-#                     + "/grid/output_dir/hti_0.1_degree_grid_centroids_land_overlap.gpkg"
-#                 )
-#             )
-#         )
-
-
-# def load_shp():
-#     return gpd.read_file(
-#         BytesIO(
-#             load_blob_data(
-#                 PROJECT_PREFIX + "/SHP/global_shapefile_GID_adm2.gpkg"
-#             )
-#         )
-#     )
-
-
-# def load_emdat():
-#     return pd.read_csv(
-#         BytesIO(
-#             load_blob_data(PROJECT_PREFIX + "/EMDAT/impact_data_clean.csv")
-#         )
-#     )
-
-
-# def load_hti_distances():
-#     return pd.read_csv(
-#         BytesIO(
-#             load_blob_data(
-#                 PROJECT_PREFIX + "/historical_forecasts/hti_distances.csv"
-#             )
-#         )
-#     )
-
-
-# def load_metadata():
-#     return pd.read_csv(
-#         BytesIO(
-#             load_blob_data(
-#                 PROJECT_PREFIX + "/rainfall/input_dir/metadata_typhoons.csv"
-#             )
-#         )
-#     )
-
 
 # For loading csv files
 def load_csv(csv_path):
@@ -256,10 +137,11 @@ def upload_in_chunks(
             )
             print(f"Uploaded {chunk_blob_name}")
 
+
 # Functions to load specific datasets
 def get_municipality_info():
     # Load municipality info datasets (is in chunks)
-    filenames = [f"grid_municipality_info_part_{i}.csv" for i in range(1,12)]
+    filenames = [f"grid_municipality_info_part_{i}.csv" for i in range(1, 9)]
     dataframes = []
     for filename in filenames:
         csv_path = f"{PROJECT_PREFIX}/GRID/{filename}"
@@ -268,9 +150,10 @@ def get_municipality_info():
     global_ids_mun = pd.concat(dataframes, ignore_index=True)
     return global_ids_mun
 
+
 def get_population_data():
     # Load population dataset (is in chunks)
-    filenames = [f"pop_grid_global_part_{i}.csv" for i in range(1,12)]
+    filenames = [f"pop_grid_global_part_{i}.csv" for i in range(1, 9)]
     dataframes = []
     for filename in filenames:
         csv_path = f"{PROJECT_PREFIX}/WORLDPOP/processed_pop/{filename}"
@@ -279,9 +162,10 @@ def get_population_data():
     global_pop = pd.concat(dataframes, ignore_index=True)
     return global_pop
 
+
 def get_impact_data():
     # Load impact data (is in chunks)
-    filenames = [f"impact_data_part_{i}.csv" for i in range(1,7)]
+    filenames = [f"impact_data_part_{i}.csv" for i in range(1, 9)]
     dataframes = []
     for filename in filenames:
         csv_path = f"{PROJECT_PREFIX}/EMDAT/{filename}"
@@ -290,3 +174,18 @@ def get_impact_data():
     impact_global = pd.concat(dataframes, ignore_index=True)
     return impact_global
 
+def get_impact_data_at_grid_level(weather_constraints=False):
+    if weather_constraints:
+        #Add here this option later
+        filenames = []
+    elif weather_constraints==False:
+        # Load impact data (is in chunks)
+        filenames = [f"impact_data_grid_global_part_{i}.csv" for i in range(1, 184)]
+    
+    dataframes = []
+    for filename in filenames:
+        csv_path = f"{PROJECT_PREFIX}/EMDAT/grid_based/{filename}"
+        df = load_csv(csv_path=csv_path)
+        dataframes.append(df)
+    impact_global = pd.concat(dataframes, ignore_index=True)
+    return impact_global
