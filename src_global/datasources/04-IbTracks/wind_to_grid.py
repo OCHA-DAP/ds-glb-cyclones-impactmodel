@@ -24,33 +24,48 @@ from src_global.utils import blob, constant
 PROJECT_PREFIX = constant.PROJECT_PREFIX
 
 """     Load grid data and shapefile        """
+
+
 def load_data():
     # Load grid-land overlap data
-    gdf = blob.load_gpkg(f"{PROJECT_PREFIX}/GRID/global_0.1_degree_grid_centroids_land_overlap.gpkg")
+    gdf = blob.load_gpkg(
+        f"{PROJECT_PREFIX}/GRID/global_0.1_degree_grid_centroids_land_overlap.gpkg"
+    )
     # Load all grid data (include oceans)
-    gdf_all = blob.load_gpkg(f"{PROJECT_PREFIX}/GRID/global_0.1_degree_grid_centroids.gpkg")
+    gdf_all = blob.load_gpkg(
+        f"{PROJECT_PREFIX}/GRID/global_0.1_degree_grid_centroids.gpkg"
+    )
 
     # Load shapefile
-    shp = blob.load_gpkg(f"{PROJECT_PREFIX}/SHP/global_shapefile_GID_adm2.gpkg")
+    shp = blob.load_gpkg(
+        f"{PROJECT_PREFIX}/SHP/global_shapefile_GID_adm2.gpkg"
+    )
     return gdf, gdf_all, shp
 
 
 """     Load impact data       """
+
+
 def load_impact_data():
     impact_data = blob.get_impact_data()
     all_events = impact_data[
-        ['GID_0', 'DisNo.', 'Start Year', 'Event Name', 'sid']
-        ].drop_duplicates()
+        ["GID_0", "DisNo.", "Start Year", "Event Name", "sid"]
+    ].drop_duplicates()
     return all_events
 
 
 """     Download and proccess tracks      """
+
+
 def get_storm_tracks(all_events):
     sel_ibtracs = []
     problematic_sid = []
     for sid in all_events.sid:
         try:
-            sel_ibtracs.append(TCTracks.from_ibtracs_netcdf(storm_id=sid))
+            t = TCTracks.from_ibtracs_netcdf(storm_id=sid)
+            # We try this just to make sure this is not an empty track
+            t.get_track().sid
+            sel_ibtracs.append(t)
         except:
             problematic_sid.append(sid)
             pass
@@ -75,7 +90,12 @@ def proccess_storm_tracks(tc_tracks):
     tracks = TCTracks()
     for i in range(len(tc_tracks.get_track())):
         # Define relevant features
-        track_xarray = tc_tracks.get_track()[i]
+        try:
+            # Multiple tracks?
+            track_xarray = tc_tracks.get_track()[i]
+        except:
+            # Just one track?
+            track_xarray = tc_tracks.get_track()
         time_array = np.array(track_xarray.time)
         time_step_array = np.array(track_xarray.time_step)
         lat_array = np.array(track_xarray.lat)
@@ -166,6 +186,7 @@ def dataframe_to_csv_bytes(dataframe: pd.DataFrame) -> bytes:
     csv_buffer.seek(0)
     return csv_buffer.getvalue()
 
+
 # Features for the model at grid level
 def create_windfield_features(tracks, cent_all, gdf_all, gdf, iso3):
     # TropCyclone class
@@ -187,6 +208,8 @@ def create_windfield_features(tracks, cent_all, gdf_all, gdf, iso3):
 
 
 """     Metadata of the events      """
+
+
 def create_metadata(tracks, all_events, shp, iso3):
     df_metadata_fixed = pd.DataFrame()
     for i in range(len(tracks.data)):
@@ -248,11 +271,10 @@ def create_metadata(tracks, all_events, shp, iso3):
 
     return df_metadata_fixed_complete
 
+
 def process_ibtracks_data(iso3_list):
     # Load grid & shapefile data
-    (gdf_global, 
-     gdf_all_global, 
-     shp_global) = load_data()
+    (gdf_global, gdf_all_global, shp_global) = load_data()
     # Load impact data
     all_events_global = load_impact_data()
 
@@ -260,7 +282,7 @@ def process_ibtracks_data(iso3_list):
     df_windspeed_complete = pd.DataFrame()
     df_meta_complete = pd.DataFrame()
     missing_storms_ibtracks = []
-    i=0
+    i = 0
     for iso3 in iso3_list:
         # Grid geometries for the country
         gdf = gdf_global[gdf_global.iso3 == iso3]
@@ -271,7 +293,7 @@ def process_ibtracks_data(iso3_list):
         # Country geometry
         shp = shp_global[shp_global.GID_0 == iso3]
         # Events subset
-        all_events = all_events_global[all_events_global.GID_0 == 'iso3']
+        all_events = all_events_global[all_events_global.GID_0 == "iso3"]
 
         # Get tracks
         tc_tracks, problematic_sid = get_storm_tracks(all_events=all_events)
@@ -279,54 +301,52 @@ def process_ibtracks_data(iso3_list):
         tracks = proccess_storm_tracks(tc_tracks=tc_tracks)
         # Create features
         df_wind = create_windfield_features(
-            tracks=tracks, 
-            cent_all=cent_all, 
-            gdf_all=gdf_all, 
+            tracks=tracks,
+            cent_all=cent_all,
+            gdf_all=gdf_all,
             gdf=gdf,
-            iso3=iso3
-            )
+            iso3=iso3,
+        )
         # Create metadata
         df_meta = create_metadata(
-            tracks=tracks, 
-            all_events=all_events, 
-            shp=shp,
-            iso3=iso3
-            )
-        
+            tracks=tracks, all_events=all_events, shp=shp, iso3=iso3
+        )
+
         # Append data
         df_windspeed_complete = pd.concat([df_windspeed_complete, df_wind])
         df_meta_complete = pd.concat([df_meta_complete, df_meta])
         missing_storms_ibtracks.append(problematic_sid)
         print(f"Dataset created {i+1}/{len(iso3_list)}")
-        i+=1
+        i += 1
     # Reset index
     df_windspeed_complete = df_windspeed_complete.reset_index(drop=True)
     df_meta_complete = df_meta_complete.reset_index(drop=True)
     # Dataframe of missing data (if there is)
     try:
-        df_missing = pd.DataFrame(missing_storms_ibtracks, columns=['sid']).dropna()
+        df_missing = pd.DataFrame(
+            missing_storms_ibtracks, columns=["sid"]
+        ).dropna()
         # Save to blob
         csv_data = df_missing.to_csv(index=False)
         blob.upload_blob_data(
-            blob_name=PROJECT_PREFIX
-            + f"windfield/missing_sid.csv",
+            blob_name=PROJECT_PREFIX + f"windfield/missing_sid.csv",
             data=csv_data,
-            )
+        )
     except:
         pass
-        
+
     # Save csvs to blob
-    csv_data_wind = df_windspeed_complete.to_csv(index=False)
-    blob.upload_blob_data(
-        blob_name=PROJECT_PREFIX
-        + f"windfield/wind_data_complete.csv",
-        data=csv_data_wind,
+    blob.upload_in_chunks(
+        dataframe=df_windspeed_complete,
+        chunk_size=100000,
+        blob=blob,
+        blob_name_template="wind_data",
+        folder="IBTRACKS",
     )
-    csv_data_meta = df_meta_complete.to_csv(index=False)
+
     blob.upload_blob_data(
-        blob_name=PROJECT_PREFIX
-        + f"windfield/meta_data_complete.csv",
-        data=df_meta_complete,
+        blob_name="global_model/PPS/metadata/meta_data.csv",
+        data=df_meta_complete.to_csv(index=False),
     )
 
 

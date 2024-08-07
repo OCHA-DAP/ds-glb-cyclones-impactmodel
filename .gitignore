@@ -147,3 +147,6 @@ token.json
 .DS_Store
 
 sandbox
+
+# Ignore local_files folder
+local_files/

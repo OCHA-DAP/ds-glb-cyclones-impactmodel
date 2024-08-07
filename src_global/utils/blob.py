@@ -15,9 +15,17 @@ from rasterio.io import MemoryFile
 
 load_dotenv()
 
-# Prod client (Not done)
-DEV_BLOB_PROJ_URL = ""
-prod_container_client = ""
+# Dev client for monitoring
+DEV_BLOB_SAS_GLOBAL = os.getenv("DEV_BLOB_SAS_GLOBAL")
+
+DEV_BLOB_BASE_GLOBAL_URL = "https://imb0chd0dev.blob.core.windows.net/"
+DEV_BLOB_PROJ_BASE_GLOBAL_URL = DEV_BLOB_BASE_GLOBAL_URL + "global"
+DEV_BLOB_PROJ_GLOBAL_URL = (
+    DEV_BLOB_PROJ_BASE_GLOBAL_URL + "?" + DEV_BLOB_SAS_GLOBAL
+)
+prod_container_client = ContainerClient.from_container_url(
+    DEV_BLOB_PROJ_GLOBAL_URL
+)
 
 # Dev client
 DEV_BLOB_SAS = os.getenv("DEV_BLOB_SAS")
@@ -28,6 +36,7 @@ DEV_BLOB_PROJ_URL = DEV_BLOB_PROJ_BASE_URL + "?" + DEV_BLOB_SAS
 dev_container_client = ContainerClient.from_container_url(DEV_BLOB_PROJ_URL)
 
 PROJECT_PREFIX = "global_model"
+
 
 # To load data
 def load_blob_data(blob_name, prod_dev: Literal["prod", "dev"] = "dev"):
@@ -72,6 +81,7 @@ def list_container_blobs(
 def load_gpkg(name):
     return gpd.read_file(BytesIO(load_blob_data(name)))
 
+
 # For loading csv files
 def load_csv(csv_path):
     return pd.read_csv(BytesIO(load_blob_data(csv_path)))
@@ -85,8 +95,8 @@ def upload_tif_to_blob(file_path, blob_name):
 
 
 # Function to load tif from blob
-def load_tif_from_blob(blob_name):
-    data = load_blob_data(blob_name)
+def load_tif_from_blob(blob_name, prod_dev: Literal["prod", "dev"] = "dev"):
+    data = load_blob_data(blob_name, prod_dev=prod_dev)
 
     # Check if data is retrieved correctly
     if not data:
@@ -174,14 +184,17 @@ def get_impact_data():
     impact_global = pd.concat(dataframes, ignore_index=True)
     return impact_global
 
+
 def get_impact_data_at_grid_level(weather_constraints=False):
     if weather_constraints:
-        #Add here this option later
+        # Add here this option later
         filenames = []
-    elif weather_constraints==False:
+    elif weather_constraints == False:
         # Load impact data (is in chunks)
-        filenames = [f"impact_data_grid_global_part_{i}.csv" for i in range(1, 184)]
-    
+        filenames = [
+            f"impact_data_grid_global_part_{i}.csv" for i in range(1, 184)
+        ]
+
     dataframes = []
     for filename in filenames:
         csv_path = f"{PROJECT_PREFIX}/EMDAT/grid_based/{filename}"

@@ -113,7 +113,9 @@ def impact_to_grid(impact_merged_adm):
 def process_impact_level(level, impact_plus, pop_grid):
     try:
         impact_level = impact_plus[impact_plus.level == level]
-        impact_merged = impact_level.merge(pop_grid, on=["GID_0", "GID_1", "GID_2"])[
+        impact_merged = impact_level.merge(
+            pop_grid, on=["GID_0", "GID_1", "GID_2"]
+        )[
             [
                 "DisNo.",
                 "sid",
@@ -140,15 +142,13 @@ def create_impact_grid_dataset(
     )
 
     # Process different levels
-    impact_data_grid_adm0 = process_impact_level('ADM0', impact_plus, pop_grid)
-    impact_data_grid_adm1 = process_impact_level('ADM1', impact_plus, pop_grid)
-    impact_data_grid_adm2 = process_impact_level('ADM2', impact_plus, pop_grid)
+    impact_data_grid_adm0 = process_impact_level("ADM0", impact_plus, pop_grid)
+    impact_data_grid_adm1 = process_impact_level("ADM1", impact_plus, pop_grid)
+    impact_data_grid_adm2 = process_impact_level("ADM2", impact_plus, pop_grid)
 
     # Concatenate results
     impact_data_grid = pd.concat(
-        [impact_data_grid_adm0, 
-         impact_data_grid_adm1, 
-         impact_data_grid_adm2]
+        [impact_data_grid_adm0, impact_data_grid_adm1, impact_data_grid_adm2]
     )
 
     return impact_data_grid
@@ -169,9 +169,10 @@ def iterate_grid_impact(iso3_list, global_ids_mun, global_pop, impact_global):
 
     # Fix > 100% affected pop regions for specific events
     impact_data_grid_global.loc[
-        impact_data_grid_global.perc_affected_pop_grid_region > 100, 
-        "perc_affected_pop_grid_region"] = 100
-    
+        impact_data_grid_global.perc_affected_pop_grid_region > 100,
+        "perc_affected_pop_grid_region",
+    ] = 100
+
     return impact_data_grid_global
 
 
