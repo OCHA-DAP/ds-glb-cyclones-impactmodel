@@ -10,10 +10,11 @@ from typing import Literal
 import geopandas as gpd
 import pandas as pd
 from azure.storage.blob import ContainerClient
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from rasterio.io import MemoryFile
 
-load_dotenv()
+
+load_dotenv(find_dotenv(), override=True)
 
 # Dev client for monitoring
 DEV_BLOB_SAS_GLOBAL = os.getenv("DEV_BLOB_SAS_GLOBAL")

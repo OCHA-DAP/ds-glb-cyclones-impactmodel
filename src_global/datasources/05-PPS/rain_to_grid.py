@@ -6,9 +6,9 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import rasterio
+# import rasterio
 import rioxarray as rxr
-from rasterstats import zonal_stats
+# from rasterstats import zonal_stats
 
 from src_global.utils import blob, constant
 
@@ -96,11 +96,13 @@ def create_rainfall_dataset(grid_global, df_meta, iso3, sid):
 
 
 # Iterate process
-def crate_rainfall_dataset(iso3_list, metadata_global, grid_global):
+def iterate_rainfall_dataset(iso3_list, metadata_global, grid_global):
     df_rainfall_total = pd.DataFrame()
     for iso3 in iso3_list:
+        print(iso3)
         metadata_country = metadata_global[metadata_global.iso3 == iso3]
         for sid in metadata_country.sid.unique():
+            print(sid)
             df_meta = metadata_country[metadata_country.sid == sid]
             # Get rainfall data at grid level
             df_rainfall = create_rainfall_dataset(
@@ -115,7 +117,7 @@ if __name__ == "__main__":
     grid_global = blob.load_gpkg(
         "global_model/GRID/global_0.1_degree_grid_centroids_land_overlap.gpkg"
     )
-    crate_rainfall_dataset(
+    iterate_rainfall_dataset(
         iso3_list=iso3_list,
         metadata_global=metadata_global,
         grid_global=grid_global,
