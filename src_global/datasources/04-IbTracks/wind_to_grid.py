@@ -19,40 +19,40 @@ from wind_functions import (
     windfield_to_grid,
 )
 
-from src_global.utils import blob, constant
-
-PROJECT_PREFIX = constant.PROJECT_PREFIX
+from concurrent.futures import ThreadPoolExecutor  
 
 """     Load grid data and shapefile        """
 
 
 def load_data():
-    # Load grid-land overlap data
-    gdf = blob.load_gpkg(
-        f"{PROJECT_PREFIX}/GRID/global_0.1_degree_grid_centroids_land_overlap.gpkg"
-    )
-    # Load all grid data (include oceans)
-    gdf_all = blob.load_gpkg(
-        f"{PROJECT_PREFIX}/GRID/global_0.1_degree_grid_centroids.gpkg"
-    )
-
+    # Load centroid data
+    files = os.listdir("/data/big/fmoss/data/GRID")
+    gdf = pd.DataFrame()
+    gdf_all = pd.DataFrame()
+    for file in files:
+        if file.startswith("grid_land_overlap_centroids_"):
+            aux = gpd.read_file(f"/data/big/fmoss/data/GRID/{file}")
+            gdf = pd.concat([gdf, aux], ignore_index=True)
+        elif file.startswith("grid_centroids_"):
+            aux = gpd.read_file(f"/data/big/fmoss/data/GRID/{file}")
+            gdf_all = pd.concat([gdf_all, aux], ignore_index=True)
+    gdf = gpd.GeoDataFrame(gdf, geometry='geometry')
+    gdf_all = gpd.GeoDataFrame(gdf_all, geometry='geometry')
     # Load shapefile
-    shp = blob.load_gpkg(
-        f"{PROJECT_PREFIX}/SHP/global_shapefile_GID_adm2.gpkg"
-    )
+    shp = gpd.read_file("/data/big/fmoss/data/SHP/GADM_adm2.gpkg")
     return gdf, gdf_all, shp
 
 
 """     Load impact data       """
 
 
+
 def load_impact_data():
-    impact_data = blob.get_impact_data()
+    impact_data = pd.read_csv("/data/big/fmoss/data/EMDAT/impact_data.csv")
     all_events = impact_data[
         ["GID_0", "DisNo.", "Start Year", "Event Name", "sid"]
     ].drop_duplicates()
     return all_events
-
 
 """     Download and proccess tracks      """
 
@@ -218,6 +218,7 @@ def create_metadata(tracks, all_events, shp, iso3):
         enddate = np.datetime64(np.array(tracks.data[i].time[-1]), "D")
         name = tracks.data[i].name
         year = tracks.data[i].sid[:4]
+        sid = tracks.data[i].sid
         nameyear = name + year
 
         # For the landfall
@@ -254,7 +255,8 @@ def create_metadata(tracks, all_events, shp, iso3):
         # Create df
         df_aux = pd.DataFrame(
             {
-                "iso3": [iso3],
+                "GID_0": [iso3],
+                "sid" : [sid],
                 "typhoon": [nameyear],
                 "startdate": [startdate],
                 "enddate": [enddate],
@@ -272,85 +274,153 @@ def create_metadata(tracks, all_events, shp, iso3):
     return df_metadata_fixed_complete
 
 
-def process_ibtracks_data(iso3_list):
-    # Load grid & shapefile data
-    (gdf_global, gdf_all_global, shp_global) = load_data()
-    # Load impact data
-    all_events_global = load_impact_data()
+# def process_ibtracks_data(iso3_list, out_dir, gdf_global, gdf_all_global, shp_global, all_events_global):
 
-    # Iterate for every country
+#     # Iterate for every country
+#     df_windspeed_complete = pd.DataFrame()
+#     df_meta_complete = pd.DataFrame()
+#     missing_storms_ibtracks = []
+#     i = 0
+#     for iso3 in iso3_list:
+#         if f"{out_dir}/windfield_data_{iso3}.csv" in os.listdir(out_dir):
+#             print(f"Dataset already created {i+1}/{len(iso3_list)}")
+#             i += 1
+#             continue
+#         else:
+#             # Grid geometries for the country
+#             gdf = gdf_global[gdf_global.iso3 == iso3]
+#             gdf_all = gdf_all_global[gdf_all_global.iso3 == iso3]
+#             # Centroids
+#             cent = Centroids.from_geodataframe(gdf)  # grid-land overlap
+#             cent_all = Centroids.from_geodataframe(gdf_all)  # include oceans
+#             # Country geometry
+#             shp = shp_global[shp_global.GID_0 == iso3]
+#             # Events subset
+#             all_events = all_events_global[all_events_global.GID_0 == iso3]
+
+#             # Get tracks
+#             tc_tracks, problematic_sid = get_storm_tracks(all_events=all_events)
+#             # Proccess tracks
+#             tracks = proccess_storm_tracks(tc_tracks=tc_tracks)
+#             # Create features
+#             df_wind = create_windfield_features(
+#                 tracks=tracks,
+#                 cent_all=cent_all,
+#                 gdf_all=gdf_all,
+#                 gdf=gdf,
+#                 iso3=iso3,
+#             )
+#             # Create metadata
+#             df_meta = create_metadata(
+#                 tracks=tracks, all_events=all_events, shp=shp, iso3=iso3
+#             )
+#             # Save data
+#             df_wind.to_csv(f"{out_dir}/windfield_data_{iso3}.csv", index=False)
+#             df_meta.to_csv(f"{out_dir}/metadata_{iso3}.csv", index=False)
+#             # Append data
+#             df_windspeed_complete = pd.concat([df_windspeed_complete, df_wind])
+#             df_meta_complete = pd.concat([df_meta_complete, df_meta])
+#             missing_storms_ibtracks.append(problematic_sid)
+#             print(f"Dataset created {i+1}/{len(iso3_list)}")
+#             i += 1
+
+
+def process_single_country(iso3, out_dir, gdf_global, gdf_all_global, shp_global, all_events_global):
+    """Processes a single country's windfield and metadata data"""
+    
+    if f"windfield_data_{iso3}.csv" in os.listdir(out_dir):
+        print(f"Dataset already created for {iso3}")
+        return None  # Skip processing
+    
+    # Grid geometries for the country
+    gdf = gdf_global[gdf_global.iso3 == iso3]
+    gdf_all = gdf_all_global[gdf_all_global.iso3 == iso3]
+    
+    # Centroids
+    cent = Centroids.from_geodataframe(gdf)  # grid-land overlap
+    cent_all = Centroids.from_geodataframe(gdf_all)  # include oceans
+    
+    # Country geometry
+    shp = shp_global[shp_global.GID_0 == iso3]
+    
+    # Events subset
+    all_events = all_events_global[all_events_global.GID_0 == iso3]
+    
+    # Get tracks
+    tc_tracks, problematic_sid = get_storm_tracks(all_events=all_events)
+    
+    # Process tracks
+    tracks = proccess_storm_tracks(tc_tracks=tc_tracks)
+    
+    # Create features
+    df_wind = create_windfield_features(
+        tracks=tracks,
+        cent_all=cent_all,
+        gdf_all=gdf_all,
+        gdf=gdf,
+        iso3=iso3,
+    )
+    
+    # Create metadata
+    df_meta = create_metadata(
+        tracks=tracks, all_events=all_events, shp=shp, iso3=iso3
+    )
+    
+    # Save data
+    df_wind.to_csv(f"{out_dir}/windfield_data_{iso3}.csv", index=False)
+    df_meta.to_csv(f"{out_dir}/metadata_{iso3}.csv", index=False)
+    missing = all_events[all_events.sid.isin(problematic_sid)]
+    missing.to_csv(f"{out_dir}/nodata_storms_{iso3}.csv", index=False)
+    print(f"Dataset created for {iso3}")
+    
+    return df_wind, df_meta, problematic_sid
+
+
+def process_ibtracks_data(iso3_list, out_dir, gdf_global, gdf_all_global, shp_global, all_events_global, max_workers=4):
+    """
+    Parallelized function to process IBTrACS data for multiple countries.
+    
+    Parameters:
+    - iso3_list: List of country ISO3 codes
+    - out_dir: Output directory
+    - gdf_global: Global GeoDataFrame of grid geometries
+    - gdf_all_global: Global GeoDataFrame (including ocean areas)
+    - shp_global: Global shapefile data
+    - all_events_global: Global event dataset
+    - max_workers: Number of threads/processes to use for parallelization
+
+    Returns (saves to csv files):
+    - windspeed_data: Country windspeed dataset
+    - meta_data: Country metadata dataset
+    - missing_storms_data: Country problematic storms IDs
+    """
+    
     df_windspeed_complete = pd.DataFrame()
     df_meta_complete = pd.DataFrame()
     missing_storms_ibtracks = []
-    i = 0
-    for iso3 in iso3_list:
-        # Grid geometries for the country
-        gdf = gdf_global[gdf_global.iso3 == iso3]
-        gdf_all = gdf_all_global[gdf_all_global.iso3 == iso3]
-        # Centroids
-        cent = Centroids.from_geodataframe(gdf)  # grid-land overlap
-        cent_all = Centroids.from_geodataframe(gdf_all)  # include oceans
-        # Country geometry
-        shp = shp_global[shp_global.GID_0 == iso3]
-        # Events subset
-        all_events = all_events_global[all_events_global.GID_0 == "iso3"]
 
-        # Get tracks
-        tc_tracks, problematic_sid = get_storm_tracks(all_events=all_events)
-        # Proccess tracks
-        tracks = proccess_storm_tracks(tc_tracks=tc_tracks)
-        # Create features
-        df_wind = create_windfield_features(
-            tracks=tracks,
-            cent_all=cent_all,
-            gdf_all=gdf_all,
-            gdf=gdf,
-            iso3=iso3,
-        )
-        # Create metadata
-        df_meta = create_metadata(
-            tracks=tracks, all_events=all_events, shp=shp, iso3=iso3
-        )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:  
+        results = list(executor.map(
+            lambda iso3: process_single_country(iso3, out_dir, gdf_global, gdf_all_global, shp_global, all_events_global),
+            iso3_list
+        ))
 
-        # Append data
-        df_windspeed_complete = pd.concat([df_windspeed_complete, df_wind])
-        df_meta_complete = pd.concat([df_meta_complete, df_meta])
-        missing_storms_ibtracks.append(problematic_sid)
-        print(f"Dataset created {i+1}/{len(iso3_list)}")
-        i += 1
-    # Reset index
-    df_windspeed_complete = df_windspeed_complete.reset_index(drop=True)
-    df_meta_complete = df_meta_complete.reset_index(drop=True)
-    # Dataframe of missing data (if there is)
-    try:
-        df_missing = pd.DataFrame(
-            missing_storms_ibtracks, columns=["sid"]
-        ).dropna()
-        # Save to blob
-        csv_data = df_missing.to_csv(index=False)
-        blob.upload_blob_data(
-            blob_name=PROJECT_PREFIX + f"windfield/missing_sid.csv",
-            data=csv_data,
-        )
-    except:
-        pass
-
-    # Save csvs to blob
-    blob.upload_in_chunks(
-        dataframe=df_windspeed_complete,
-        chunk_size=100000,
-        blob=blob,
-        blob_name_template="wind_data",
-        folder="IBTRACKS",
-    )
-
-    blob.upload_blob_data(
-        blob_name="global_model/PPS/metadata/meta_data.csv",
-        data=df_meta_complete.to_csv(index=False),
-    )
 
 
 if __name__ == "__main__":
+    # Load grid & shapefile data
+    (gdf_global, gdf_all_global, shp_global) = load_data()
+    shp_global['iso3'] = shp_global.GID_0
+    # Load impact data
+    all_events_global = load_impact_data()
     # Run main function
-    iso3_list = constant.iso3_list
-    process_ibtracks_data(iso3_list)
+    iso3_list = all_events_global.GID_0.unique()
+    out_dir = '/data/big/fmoss/data/IBTRACS'
+    os.makedirs(out_dir, exist_ok=True)
+    process_ibtracks_data(
+        iso3_list, 
+        out_dir, 
+        gdf_global, gdf_all_global, shp_global, 
+        all_events_global,
+        max_workers=5
+    )

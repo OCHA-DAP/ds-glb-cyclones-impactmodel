@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-import io
 import os
-import tempfile
-from pathlib import Path
-
-import geopandas as gpd
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 from shapely.geometry import Polygon
+import concurrent.futures
 
-from src_global.utils import blob
+import logging
+# Set up logging
+logging.basicConfig(filename="grid.log", level=logging.ERROR, 
+                    format="%(asctime)s - %(levelname)s - %(message)s")
 
-PROJECT_PREFIX = "global_model"
 
-
-# Function for defining grid level for each country
+# Country-grid data creation
 def create_grid(shp, iso3):
+    shp = shp[shp.GID_0 == iso3].reset_index(drop=True)
+    
     # Calculate the bounding box of the GeoDataFrame
     bounds = shp.total_bounds
     lon_min, lat_min, lon_max, lat_max = bounds
 
-    # Define a margin to expand the bounding box (adjust as needed)
+    # Define a margin to expand the bounding box
     margin = 1
 
     # Create expanded bounding box coordinates
@@ -30,17 +30,12 @@ def create_grid(shp, iso3):
     lat_max = np.round(lat_max + margin)
 
     # Define grid
-    xmin, xmax, ymin, ymax = (
-        lon_min,
-        lon_max,
-        lat_min,
-        lat_max,
-    )  # Haiti extremes coordintates
-
     cell_size = 0.1
-    cols = list(np.arange(xmin, xmax + cell_size, cell_size))
-    rows = list(np.arange(ymin, ymax + cell_size, cell_size))
-    rows.reverse()
+    cols = np.arange(lon_min, lon_max + cell_size, cell_size)
+    rows = np.arange(lat_min, lat_max + cell_size, cell_size)
+
+    # Reverse rows using slicing
+    rows = rows[::-1]
 
     polygons = [
         Polygon(
@@ -54,28 +49,26 @@ def create_grid(shp, iso3):
         for x in cols
         for y in rows
     ]
+    
+    # Create grid GeoDataFrame
     grid = gpd.GeoDataFrame({"geometry": polygons}, crs=shp.crs)
     grid["id"] = grid.index + 1
     grid["iso3"] = iso3
 
-    # %% Centroids
-    # Extract lat and lon from the centerpoint
-    grid["Longitude"] = grid["geometry"].centroid.map(lambda p: p.x)
-    grid["Latitude"] = grid["geometry"].centroid.map(lambda p: p.y)
-    grid["Centroid"] = (
-        round(grid["Longitude"], 2).astype(str)
-        + "W"
-        + "_"
-        + round(grid["Latitude"], 2).astype(str)
-        + "N"
-    )
+    # Add centroids directly
+    grid["Longitude"] = grid["geometry"].centroid.x
+    grid["Latitude"] = grid["geometry"].centroid.y
+    grid["Centroid"] = grid["Longitude"].round(2).astype(str) + "W_" + grid["Latitude"].round(2).astype(str)
 
+    # Centroids GeoDataFrame
     grid_centroids = grid.copy()
     grid_centroids["geometry"] = grid_centroids["geometry"].centroid
 
-    # %% intersection of grid and shapefile
+    # Intersection of grid and shapefile
     adm2_grid_intersection = gpd.overlay(shp, grid, how="identity")
     adm2_grid_intersection = adm2_grid_intersection.dropna(subset=["id"])
+    
+    # Filter grid that intersects
     grid_land_overlap = grid.loc[grid["id"].isin(adm2_grid_intersection["id"])]
 
     # Centroids of intersection
@@ -83,163 +76,89 @@ def create_grid(shp, iso3):
         grid["id"].isin(adm2_grid_intersection["id"])
     ]
 
-    #  Grids by municipality
+    # Grids by municipality (Spatial join)
     grid_muni = gpd.sjoin(shp, grid_land_overlap, how="inner")
 
-    intersection_areas = []
-    for index, row in grid_muni.iterrows():
-        id_cell = row["id"]
-        grid_cell = grid_land_overlap[grid_land_overlap.id == id_cell].geometry
-        municipality_polygon = row["geometry"]
-        intersection_area = grid_cell.intersection(municipality_polygon).area
-        intersection_areas.append(intersection_area)
+    # Parallelized calculation of intersection areas
+    def calculate_intersection_area(row):
+        grid_cell = grid_land_overlap.loc[grid_land_overlap.id == row.id, "geometry"]
+        municipality_polygon = row.geometry
 
-    # Add area of intersection to each row
-    grid_muni["intersection_area"] = [x.array[0] for x in intersection_areas]
+        # Ensure valid geometries
+        if not grid_cell.empty and municipality_polygon.is_valid:
+            intersection_area = grid_cell.iloc[0].intersection(municipality_polygon).area
+            return intersection_area
+        return 0
 
-    # Find the municipality with the largest intersection area
-    # for each grid centroid and drop the rest
+    # Use ThreadPoolExecutor or ProcessPoolExecutor for parallel processing
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        intersection_areas = list(executor.map(calculate_intersection_area, grid_muni.itertuples(index=False)))
+
+    # Add intersection area to grid_muni
+    grid_muni["intersection_area"] = intersection_areas
+
+    # Sort by intersection area and drop duplicates
     grid_muni = grid_muni.sort_values("intersection_area", ascending=False)
     grid_muni_total = grid_muni.drop_duplicates(subset="id", keep="first")
     grid_muni_total = grid_muni_total[["id", "GID_0", "GID_1", "GID_2"]]
 
-    # Change ID naming
-    grid_muni_total["id"] = grid_muni_total["id"].apply(
-        lambda x: iso3 + "_" + str(x)
-    )
+    # Change ID naming with iso3
+    grid_muni_total["id"] = grid_muni_total["id"].apply(lambda x: iso3 + "_" + str(x))
     grid["id"] = grid["id"].apply(lambda x: iso3 + "_" + str(x))
-    grid_land_overlap["id"] = grid_land_overlap["id"].apply(
-        lambda x: iso3 + "_" + str(x)
-    )
-    grid_centroids["id"] = grid_centroids["id"].apply(
-        lambda x: iso3 + "_" + str(x)
-    )
-    grid_land_overlap_centroids["id"] = grid_land_overlap_centroids[
-        "id"
-    ].apply(lambda x: iso3 + "_" + str(x))
-    adm2_grid_intersection["id"] = adm2_grid_intersection["id"].apply(
-        lambda x: iso3 + "_" + str(x)
-    )
+    grid_land_overlap["id"] = grid_land_overlap["id"].apply(lambda x: iso3 + "_" + str(x))
+    grid_centroids["id"] = grid_centroids["id"].apply(lambda x: iso3 + "_" + str(x))
+    grid_land_overlap_centroids["id"] = grid_land_overlap_centroids["id"].apply(lambda x: iso3 + "_" + str(x))
+    adm2_grid_intersection["id"] = adm2_grid_intersection["id"].apply(lambda x: iso3 + "_" + str(x))
 
     return (
         grid,
         grid_land_overlap,
         grid_centroids,
         grid_land_overlap_centroids,
-        grid_muni_total,
+        grid_muni_total
     )
 
+# Parallel processing for multiple countries
+def process_multiple_countries(shp, out_path):
+    os.makedirs(out_path, exist_ok=True)
+    countries = shp['GID_0'].unique()
 
-# For uploading large files to the blob
-def upload_in_chunks(
-    dataframe,
-    chunk_size,
-    blob,
-    blob_name_template,
-    project_prefix=PROJECT_PREFIX,
-    folder="GRID",
-):
-    num_chunks = len(dataframe) // chunk_size + 1
-    for i in range(num_chunks):
-        chunk = dataframe[i * chunk_size : (i + 1) * chunk_size]
-        if not chunk.empty:
-            buffer = io.StringIO()
-            chunk.to_csv(buffer, index=False)
-            buffer.seek(0)
-            chunk_blob_name = f"{project_prefix}/{folder}/{blob_name_template}_part_{i+1}.csv"
-            blob.upload_blob_data(
-                blob_name=chunk_blob_name,
-                data=buffer.getvalue(),
-                prod_dev="dev",
-            )
-            print(f"Uploaded {chunk_blob_name}")
+    def process_country(iso3):
+        try:
+            # Check if output files already exist
+            if (os.path.exists(f"{out_path}/grid_{iso3}.gpkg") and
+                os.path.exists(f"{out_path}/grid_land_overlap_{iso3}.gpkg") and
+                os.path.exists(f"{out_path}/grid_centroids_{iso3}.gpkg") and
+                os.path.exists(f"{out_path}/grid_land_overlap_centroids_{iso3}.gpkg") and
+                os.path.exists(f"{out_path}/grid_municipality_info_{iso3}.csv")):
+                print(f"Files for {iso3} already exist, skipping processing.")
+                return
 
+            # Call the create_grid function to process data for the country
+            grid, grid_land_overlap, grid_centroids, grid_land_overlap_centroids, grid_muni_total = create_grid(shp, iso3)
 
-def iterate_grid_creation():
-    # Load global shapefile
-    global_shp = blob.load_gpkg(
-        name=f"{PROJECT_PREFIX}/SHP/global_shapefile_GID_adm2.gpkg"
-    )
-    # List of ISO3 regions
-    isos = global_shp.GID_0.unique()
+            # Save to files
+            grid.to_file(f"{out_path}/grid_{iso3}.gpkg", layer="grid", driver="GPKG")
+            grid_land_overlap.to_file(f"{out_path}/grid_land_overlap_{iso3}.gpkg", layer="grid_land_overlap", driver="GPKG")
+            grid_centroids.to_file(f"{out_path}/grid_centroids_{iso3}.gpkg", layer="grid_centroids", driver="GPKG")
+            grid_land_overlap_centroids.to_file(f"{out_path}/grid_land_overlap_centroids_{iso3}.gpkg", layer="grid_land_overlap_centroids", driver="GPKG")
+            grid_muni_total.to_csv(f"{out_path}/grid_municipality_info_{iso3}.csv", index=False)
 
-    # Iterate for every country
-    grid_total = pd.DataFrame()
-    grid_land_overlap_total = pd.DataFrame()
-    grid_centroids_total = pd.DataFrame()
-    grid_land_overlap_centroids_total = pd.DataFrame()
-    grid_muni_total = pd.DataFrame()
-    for iso3 in isos:
-        shp = global_shp[global_shp.GID_0 == iso3]
-        # Run function
-        (
-            grid,
-            grid_land_overlap,
-            grid_centroids,
-            grid_land_overlap_centroids,
-            grid_muni,
-        ) = create_grid(shp=shp, iso3=iso3)
-        # Append results
-        grid_total = pd.concat([grid_total, grid])
-        grid_land_overlap_total = pd.concat(
-            [grid_land_overlap_total, grid_land_overlap]
-        )
-        grid_centroids_total = pd.concat(
-            [grid_centroids_total, grid_centroids]
-        )
-        grid_land_overlap_centroids_total = pd.concat(
-            [grid_land_overlap_centroids_total, grid_land_overlap_centroids]
-        )
-        grid_muni_total = pd.concat([grid_muni_total, grid_muni])
+            # Free memory
+            grid, grid_land_overlap, grid_centroids, grid_land_overlap_centroids, grid_muni_total = [None] * 5
+        
+        except Exception as e:
+            # Log the error along with the country ISO3 code
+            logging.error(f"Error processing {iso3}: {e}")
 
-    # Reset index
-    grid_total = grid_total.reset_index(drop=True)
-    grid_land_overlap_total = grid_land_overlap_total.reset_index(drop=True)
-    grid_centroids_total = grid_centroids_total.reset_index(drop=True)
-    grid_land_overlap_centroids_total = (
-        grid_land_overlap_centroids_total.reset_index(drop=True)
-    )
-    grid_muni_total = grid_muni_total.reset_index(drop=True)
-
-    # Save datasets
-    datasets = {
-        "GRID/global_0.1_degree_grid.gpkg": grid_total,
-        "GRID/global_0.1_degree_grid_centroids.gpkg": grid_centroids_total,
-        "GRID/global_0.1_degree_grid_land_overlap.gpkg": grid_land_overlap_total,
-        "GRID/global_0.1_degree_grid_centroids_land_overlap.gpkg": grid_land_overlap_centroids_total,
-    }
-
-    csv_datasets = {"GRID/grid_municipality_info.csv": grid_muni_total}
-
-    # Create a temporary directory for saving files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_dir_path = Path(temp_dir)
-
-        # Save and upload GeoPackage datasets
-        for filename, gdf in datasets.items():
-            local_file_path = temp_dir_path / filename.split("/")[-1]
-            # Save in temp_dir with filename only
-            gdf.to_file(local_file_path, driver="GPKG")
-            blob_name = f"{PROJECT_PREFIX}/{filename}"
-
-            with open(local_file_path, "rb") as file:
-                data = file.read()
-                blob.upload_blob_data(
-                    blob_name=blob_name, data=data, prod_dev="dev"
-                )
-
-        # Save and upload CSV dataset (in chunks)
-        chunk_size = 100000  # Adjust chunk size as necessary
-        blob_name_template = "grid_municipality_info"
-        upload_in_chunks(
-            grid_muni_total,
-            chunk_size,
-            blob,
-            blob_name_template,
-            folder="GRID",
-        )
+    # Parallel processing with max_workers=4
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        executor.map(process_country, countries)
 
 
 if __name__ == "__main__":
+    # Load global shapefile
+    global_shp = gpd.read_file('/home/fmoss/GLOBAL MODEL/data/SHP/gadm_410.gdb')
+    out_path = "/data/big/fmoss/data/GRID/"
     # Define grid level for every country available in the impact data
-    iterate_grid_creation()
+    process_multiple_countries(global_shp, out_path)

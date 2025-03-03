@@ -6,6 +6,24 @@ __pycache__/
 # C extensions
 *.so
 
+# csv
+*.csv
+
+# numpy files
+*.npz
+
+# out files
+*.out
+
+# TIFF files
+*.tif
+
+# zipped files
+*.zip
+
+# gpkg files
+*.gpkg
+
 # Distribution / packaging
 .Python
 build/
@@ -14,6 +32,8 @@ dist/
 downloads/
 eggs/
 .eggs/
+.tif_files_floods/
+tif_files_floods/
 lib/
 lib64/
 parts/
@@ -150,3 +170,10 @@ sandbox
 
 # Ignore local_files folder
 local_files/
+country_specific_flood_risk/
+major_rivers/
+rivers/
+
+# Specific files
+grid_old.py
+download_srtm_tiles_old.py

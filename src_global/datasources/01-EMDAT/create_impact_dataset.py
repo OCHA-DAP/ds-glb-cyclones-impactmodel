@@ -9,17 +9,8 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
-from src_global.utils import blob
-
-PROJECT_PREFIX = "global_model"
-
-
 # Function to load and clean emdat dataset
-def clean_emdat():
-    # Load emdat database
-    impact_data = blob.load_csv(
-        csv_path=f"{PROJECT_PREFIX}/EMDAT/emdat-tropicalcyclone-2000-2022-processed-sids.csv"
-    )
+def clean_emdat(impact_data):
 
     impact_data_global = (
         impact_data[
@@ -27,6 +18,7 @@ def clean_emdat():
                 "DisNo.",
                 "Total Affected",
                 "Start Year",
+                "Start Month",
                 "iso3",
                 "Country",
                 "Admin Units",
@@ -210,16 +202,9 @@ def add_missing_sid(df_impact):
 
 
 # Function to geolocate the emdat database (GID codes by GDAM shapefile)
-def geolocate_impact(impact_data):
-    # Load GADM shp
-    global_shp = blob.load_gpkg(
-        name=f"{PROJECT_PREFIX}/SHP/global_shapefile_GID_adm2.gpkg"
-    )
-    # Load GUIL shp
-    guil_shp = blob.load_gpkg(
-        name=f"{PROJECT_PREFIX}/SHP/global_shapefile_GUIL_adm2.gpkg"
-    )
-    guil_shp = guil_shp[["ADM2_CODE", "ADM1_CODE", "ADM0_NAME", "geometry"]]
+def geolocate_impact(impact_data, GID_shapefile, GUIL_shapefile):
+    global_shp = GID_shapefile
+    guil_shp = GUIL_shapefile[["ADM2_CODE", "ADM1_CODE", "ADM0_NAME", "geometry"]]
 
     # Create "affected regions" column
     impact_data[["level", "regions_affected"]] = impact_data[
@@ -236,7 +221,7 @@ def geolocate_impact(impact_data):
 
     # Set the CRS for geo_impact_data if not already set
     geo_impact_data.set_crs(
-        epsg=4326, inplace=True
+        epsg=4326, inplace=True, allow_override=True
     )  # Assuming WGS84 (epsg:4326)
 
     # Ensure both GeoDataFrames use the same CRS
@@ -253,7 +238,7 @@ def geolocate_impact(impact_data):
 
     # Merge with shapefile
     merged_gdf = gpd.sjoin(
-        geo_impact_data_subnational, global_shp, how="left", op="within"
+        geo_impact_data_subnational, global_shp, how="left", predicate="within"
     )
 
     # Identify points that were not matched
@@ -303,6 +288,7 @@ def geolocate_impact(impact_data):
             "Total Affected",
             "level",
             "Start Year",
+            "Start Month",
             # "Country",
             "GID_0",
             "GID_1",
@@ -321,12 +307,12 @@ def geolocate_impact(impact_data):
         level = df_event.level.unique()[0]
         df_loc = reduced_shp[reduced_shp.GID_0 == country]
         # Merge
-        if level == "adm1":
+        if level == "ADM1":
             df_event = df_event.drop("GID_2", axis=1)
             reduced_merged = pd.merge(
                 df_event, df_loc, on=["GID_0", "GID_1"], how="right"
             )
-        elif level == "adm2":
+        elif level == "ADM2":
             reduced_merged = pd.merge(
                 df_event, df_loc, on=["GID_0", "GID_1", "GID_2"], how="right"
             )
@@ -344,6 +330,7 @@ def geolocate_impact(impact_data):
         reduced_merged["DisNo."] = reduced_merged["DisNo."].ffill()
         reduced_merged["sid"] = reduced_merged["sid"].ffill()
         reduced_merged["Start Year"] = reduced_merged["Start Year"].ffill()
+        reduced_merged["Start Month"] = reduced_merged["Start Month"].ffill()
         reduced_merged["Event Name"] = reduced_merged["Event Name"].ffill()
         reduced_merged["level"] = reduced_merged["level"].ffill()
         # reduced_merged["Country"] = reduced_merged["Country"].ffill()
@@ -360,20 +347,17 @@ def geolocate_impact(impact_data):
     # Add missing sid data
     df_impact_complete_fixed = add_missing_sid(df_impact_complete)
 
-    # Save results
-    chunk_size = 100000  # Adjust chunk size as necessary
-    blob_name_template = "impact_data"
-    blob.upload_in_chunks(
-        dataframe=df_impact_complete_fixed,
-        chunk_size=chunk_size,
-        blob=blob,
-        blob_name_template=blob_name_template,
-        folder="EMDAT",
-    )
+    return df_impact_complete_fixed
 
 
 if __name__ == "__main__":
     # Clean EMDAT dataset
-    impact_data = clean_emdat()
+    emdat_data = pd.read_csv("/home/fmoss/GLOBAL MODEL/data/EMDAT/emdat-tropicalcyclone-2000-2022-processed-sids.csv")
+    impact_data = clean_emdat(emdat_data)
     # Create impact dataset at adm2 level for event
-    geolocate_impact(impact_data)
+    GID_shapefile = gpd.read_file("/data/big/fmoss/data/SHP/GADM_adm2.gpkg")
+    GUIL_shapefile = gpd.read_file("/data/big/fmoss/data/SHP/global_shapefile_GUIL_adm2.gpkg")
+    df_impact = geolocate_impact(impact_data, GID_shapefile, GUIL_shapefile)
+    out_path = "/data/big/fmoss/data/EMDAT/impact_data.csv"
+    os.makedirs("/data/big/fmoss/data/EMDAT", exist_ok=True)
+    df_impact.to_csv(out_path, index=False)

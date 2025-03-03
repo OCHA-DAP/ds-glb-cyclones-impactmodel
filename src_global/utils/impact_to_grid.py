@@ -7,9 +7,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from src_global.utils import blob, constant
-
-
 # Function to add population data to municipality info
 def add_pop_info_to_impact_data(
     iso3, global_ids_mun, global_pop, impact_global
@@ -79,9 +76,9 @@ def impact_to_grid(impact_merged_adm):
             * df_event_dmg_with_pop["Total Affected"].unique()
             / df_event_dmg_with_pop["population"].sum()
         )
-        # If, for some reason, there are >100% dmg in some cells, set the dmg to 100%
-        if perc_dmg > 1:
-            perc_dmg = 1
+        # # If, for some reason, there are >100% dmg in some cells, set the dmg to 100%
+        # if perc_dmg > 1:
+        #     perc_dmg = 1
 
         """     Different grid disagraggation definitions       """
 
@@ -177,29 +174,22 @@ def iterate_grid_impact(iso3_list, global_ids_mun, global_pop, impact_global):
 
 
 if __name__ == "__main__":
-    # Load necessary constants
-    iso3_list = constant.iso3_list
-    PROJECT_PREFIX = constant.PROJECT_PREFIX
 
-    # Load municipality info datasets (is in chunks)
-    global_ids_mun = blob.get_municipality_info()
-    # Load population dataset (is in chunks)
-    global_pop = blob.get_population_data()
-    # Load impact data (is in chunks)
-    impact_global = blob.get_impact_data()
+    # Load municipality info dataset
+    global_ids_mun = pd.read_csv("/data/big/fmoss/data/GRID/merged/global_grid_municipality_info.csv")
+    # Load population dataset
+    global_pop = pd.read_csv("/data/big/fmoss/data/Worldpop/grid_data/merged/global_grid_worldpop.csv")
+    # Load impact data
+    impact_global = pd.read_csv("/data/big/fmoss/data/EMDAT/impact_data.csv")
 
     # Get impact data to grid level
+    iso3_list = global_ids_mun.GID_0.unique()
     impact_data_grid_global = iterate_grid_impact(
         iso3_list=iso3_list,
         global_ids_mun=global_ids_mun,
         global_pop=global_pop,
         impact_global=impact_global,
     )
-    # Upload to blob in chunks
-    blob.upload_in_chunks(
-        dataframe=impact_data_grid_global,
-        chunk_size=100000,
-        blob=blob,
-        blob_name_template="impact_data_grid_global",
-        folder="EMDAT/grid_based",
-    )
+    # Save data
+    impact_data_grid_global.to_csv("/data/big/fmoss/data/EMDAT/global_grid_impact_data.csv", ignore_index=True)
+
