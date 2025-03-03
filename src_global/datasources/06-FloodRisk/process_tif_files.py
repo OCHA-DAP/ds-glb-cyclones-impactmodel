@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
+from tempfile import TemporaryDirectory
+
+import geopandas as gpd
+import numpy as np
+import pandas as pd
 import rasterio
+from joblib import Parallel, delayed
 from rasterio.merge import merge
 from rasterstats import zonal_stats
-import numpy as np
-from tempfile import TemporaryDirectory
-import geopandas as gpd
-import pandas as pd
 from shapely.geometry import box
-from concurrent.futures import ThreadPoolExecutor
-from joblib import Parallel, delayed
 
 # def merge_tif_files(tif_paths):
 #     """
 #     Merges multiple TIFF files into a single mosaic and returns the merged data.
-    
+
 #     :param tif_paths: List of paths to the TIFF files to be merged.
 #     :return: A tuple containing:
 #         - merged_data (numpy array): The merged raster data from the first band.
@@ -24,15 +25,15 @@ from joblib import Parallel, delayed
 #     """
 #     # Open all TIFF files
 #     src_files = [rasterio.open(tif) for tif in tif_paths]
-    
+
 #     # Ensure all files have the same CRS
 #     crs_list = [src.crs for src in src_files]
 #     if not all(crs == crs_list[0] for crs in crs_list):
 #         raise ValueError("All input TIFF files must have the same CRS.")
-    
+
 #     # Merge the TIFF files into a single mosaic
 #     mosaic, out_transform = merge(src_files)
-    
+
 #     # Define the metadata for the output file using the first raster
 #     out_meta = src_files[0].meta.copy()
 #     out_meta.update({
@@ -42,15 +43,17 @@ from joblib import Parallel, delayed
 #         "width": mosaic.shape[2],   # Width of the merged raster
 #         "transform": out_transform  # Updated transform
 #     })
-    
+
 #     # Close all opened files
 #     for src in src_files:
 #         src.close()
-    
+
 #     return mosaic, out_transform, out_meta
 
 
-def select_tif_files_by_country(tif_paths, grid_global, iso3, adjusted=True, buffer=3):
+def select_tif_files_by_country(
+    tif_paths, grid_global, iso3, adjusted=True, buffer=3
+):
     """
     Selects TIF files corresponding to a specified country based on ISO3 code and latitude/longitude in the filename.
 
@@ -67,7 +70,11 @@ def select_tif_files_by_country(tif_paths, grid_global, iso3, adjusted=True, buf
     # Get country boundaries
     # country_geometry = grid_global[grid_global.iso3 == iso3].geometry.unary_union.buffer(buffer)
     selected_files = []
-    country_geometry = grid_global[grid_global.iso3 == iso3].geometry.union_all().buffer(buffer)
+    country_geometry = (
+        grid_global[grid_global.iso3 == iso3]
+        .geometry.union_all()
+        .buffer(buffer)
+    )
 
     # Regex patterns for different file types
     pattern = (
@@ -84,19 +91,23 @@ def select_tif_files_by_country(tif_paths, grid_global, iso3, adjusted=True, buf
             lat_value = int(lat_value) if lat_sign == "N" else -int(lat_value)
             lon_value = int(lon_value) if lon_sign == "E" else -int(lon_value)
 
-            tif_point = box(lon_value - 0.5, lat_value - 0.5, lon_value + 0.5, lat_value + 0.5).centroid
-            
+            tif_point = box(
+                lon_value - 0.5,
+                lat_value - 0.5,
+                lon_value + 0.5,
+                lat_value + 0.5,
+            ).centroid
+
             if country_geometry.contains(tif_point):
                 selected_files.append(tif_path)
 
     return selected_files
 
 
-
 def reproject_grid(grid, target_crs):
     """
     Reprojects a GeoDataFrame to the target CRS.
-    
+
     :param grid: GeoDataFrame with the original CRS.
     :param target_crs: Target CRS to reproject into.
     :return: Reprojected GeoDataFrame.
@@ -104,6 +115,7 @@ def reproject_grid(grid, target_crs):
     if grid.crs != target_crs:
         grid = grid.to_crs(target_crs)
     return grid
+
 
 # def save_mosaic_to_tif(mosaic, out_transform, out_meta, output_file):
 #     """
@@ -122,7 +134,7 @@ def reproject_grid(grid, target_crs):
 #         "width": mosaic.shape[2],  # Width of the raster
 #         "transform": out_transform  # Georeferencing transform
 #     })
-    
+
 #     # Write the mosaic to a GeoTIFF file
 #     with rasterio.open(output_file, "w", **out_meta) as dest:
 #         dest.write(mosaic)
@@ -130,7 +142,7 @@ def reproject_grid(grid, target_crs):
 # def aggregate_raster_to_grid(raster_path, grid):
 #     """
 #     Clips a raster to each grid cell and calculates maximum depth values per grid cell.
-    
+
 #     :param raster_path: Path to the input raster file.
 #     :param grid: GeoDataFrame representing grid cells.
 #     :return: GeoDataFrame with aggregated statistics added.
@@ -140,7 +152,7 @@ def reproject_grid(grid, target_crs):
 #         # Ensure the grid and raster are in the same CRS
 #         if grid.crs != src.crs:
 #             grid = grid.to_crs(src.crs)
-        
+
 #         # Use zonal_stats to calculate max values within each grid cell
 #         stats = zonal_stats(
 #             grid,  # GeoDataFrame or geometry to aggregate over
@@ -153,13 +165,13 @@ def reproject_grid(grid, target_crs):
 
 #     # Add max depth to the grid GeoDataFrame
 #     grid["flood_risk"] = [stat["max"] if stat["max"] is not None else np.nan for stat in stats]
-    
+
 #     return grid
 
 # def process_flood_risk(grid_global, iso, tif_paths_adj):
 #     # Select tif files for the specified country
 #     tif_paths_cat = select_tif_files_by_country(tif_paths_adj, grid_global, iso, adjusted=True, buffer=5)
-    
+
 #     # Filter and reproject the grid for the selected country
 #     grid_country = grid_global[grid_global.iso3 == iso].copy()
 #     grid_country_projected = reproject_grid(grid_country, "EPSG:4326")
@@ -168,12 +180,12 @@ def reproject_grid(grid, target_crs):
 #     if len(tif_paths_cat) > 0:
 #         # Merge tif files
 #         mosaic_adj, out_transform_adj, out_meta_adj = merge_tif_files(tif_paths_cat)
-        
+
 #         # Define output file path and create the directory if needed
 #         output_file = f"./country_specific_flood_risk/{iso.lower()}_flood_risk_cat.tif"
 #         output_dir = os.path.dirname(output_file)  # Extract directory path
 #         os.makedirs(output_dir, exist_ok=True)     # Create directory
-        
+
 #         # Save the mosaic to a GeoTIFF file
 #         save_mosaic_to_tif(mosaic_adj, out_transform_adj, out_meta_adj, output_file)
 
@@ -181,7 +193,7 @@ def reproject_grid(grid, target_crs):
 #         with rasterio.open(output_file) as src:
 #             raster = src.read(1)  # Read the first band
 #             raster_crs = src.crs
-        
+
 #         # Aggregate raster data to the grid and fill NaN values
 #         aggregated_grid = aggregate_raster_to_grid(output_file, grid_country_projected)# .fillna(0)
 #     else:
@@ -192,11 +204,10 @@ def reproject_grid(grid, target_crs):
 #     return aggregated_grid
 
 
-
 def process_single_tif(tif_path, grid):
     """
     Process a single TIF file, extracting max flood risk per grid cell.
-    
+
     :param tif_path: Path to the TIF file.
     :param grid: GeoDataFrame of grid cells.
     :return: List of max flood risk values per grid cell.
@@ -205,20 +216,28 @@ def process_single_tif(tif_path, grid):
         # Ensure the grid and raster are in the same CRS
         if grid.crs != src.crs:
             grid = grid.to_crs(src.crs)
-        
+
         # Compute max flood depth per grid cell
         stats = zonal_stats(
-            grid, tif_path, stats=["max"], nodata=src.nodata,
-            affine=src.transform, all_touched=True
+            grid,
+            tif_path,
+            stats=["max"],
+            nodata=src.nodata,
+            affine=src.transform,
+            all_touched=True,
         )
-    
-    return [stat["max"] if stat["max"] is not None else np.nan for stat in stats]
+
+    return [
+        stat["max"] if stat["max"] is not None else np.nan for stat in stats
+    ]
 
 
-def process_flood_risk(grid_global, iso, tif_paths_adj, parallel=True, n_jobs=-1):
+def process_flood_risk(
+    grid_global, iso, tif_paths_adj, parallel=True, n_jobs=-1
+):
     """
     Compute flood risk at grid level without merging all TIF files at once.
-    
+
     :param grid_global: GeoDataFrame containing all country grids.
     :param iso: ISO3 country code.
     :param tif_paths_adj: List of TIF file paths.
@@ -227,12 +246,14 @@ def process_flood_risk(grid_global, iso, tif_paths_adj, parallel=True, n_jobs=-1
     :return: Updated GeoDataFrame with flood risk.
     """
     # Select TIFF files for the given country
-    tif_paths_cat = select_tif_files_by_country(tif_paths_adj, grid_global, iso, adjusted=True, buffer=3)
-    
+    tif_paths_cat = select_tif_files_by_country(
+        tif_paths_adj, grid_global, iso, adjusted=True, buffer=3
+    )
+
     # Extract country-specific grid and reproject it
     grid_country = grid_global[grid_global.iso3 == iso].copy()
     grid_country = reproject_grid(grid_country, "EPSG:4326")
-    
+
     if not tif_paths_cat:
         # No TIF files found; return grid with NaN flood risk
         grid_country["flood_risk"] = np.nan
@@ -240,23 +261,30 @@ def process_flood_risk(grid_global, iso, tif_paths_adj, parallel=True, n_jobs=-1
 
     # Process TIF files (in parallel if enabled)
     if parallel:
-        results = Parallel(n_jobs=n_jobs)(delayed(process_single_tif)(tif, grid_country) for tif in tif_paths_cat)
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(process_single_tif)(tif, grid_country)
+            for tif in tif_paths_cat
+        )
     else:
-        results = [process_single_tif(tif, grid_country) for tif in tif_paths_cat]
+        results = [
+            process_single_tif(tif, grid_country) for tif in tif_paths_cat
+        ]
 
     # Convert results into a NumPy array and compute max per grid cell
     results = np.array(results)  # Shape: (num_tifs, num_grid_cells)
-    grid_country["flood_risk"] = np.nanmax(results, axis=0)  # Max per grid cell across all TIFs
+    grid_country["flood_risk"] = np.nanmax(
+        results, axis=0
+    )  # Max per grid cell across all TIFs
 
     return grid_country
 
 
-
-
-def process_and_save_flood_risk(iso, grid_global, tif_paths_adj, output_dir, parallel=True, n_jobs=-1):
+def process_and_save_flood_risk(
+    iso, grid_global, tif_paths_adj, output_dir, parallel=True, n_jobs=-1
+):
     """
     Processes flood risk for a given ISO3 country code and saves the results to a CSV.
-    
+
     :param iso: ISO3 country code.
     :param grid_global: GeoDataFrame containing all country grids.
     :param tif_paths_adj: List of available TIF file paths.
@@ -265,28 +293,33 @@ def process_and_save_flood_risk(iso, grid_global, tif_paths_adj, output_dir, par
     :param n_jobs: Number of parallel jobs (-1 uses all available cores).
     """
     out_path = os.path.join(output_dir, f"flood_risk_{iso}.csv")
-    
+
     # # Skip processing if the output file already exists
     # if os.path.exists(out_path):
     #     print(f"Skipping {iso}, output already exists: {out_path}")
     #     return
-    
+
     print(f"Processing: {iso}")
-    
+
     # Compute flood risk
-    flood_risk_iso = process_flood_risk(grid_global, iso, tif_paths_adj, parallel=parallel, n_jobs=n_jobs)
+    flood_risk_iso = process_flood_risk(
+        grid_global, iso, tif_paths_adj, parallel=parallel, n_jobs=n_jobs
+    )
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Save results
-    flood_risk_iso[['id', 'iso3', 'flood_risk']].to_csv(out_path, index=False)
+    flood_risk_iso[["id", "iso3", "flood_risk"]].to_csv(out_path, index=False)
     print(f"Saved: {out_path}")
 
-def process_multiple_countries(grid_global, output_dir, tif_path, max_workers=4, parallel=True, n_jobs=-1):
+
+def process_multiple_countries(
+    grid_global, output_dir, tif_path, max_workers=4, parallel=True, n_jobs=-1
+):
     """
     Processes flood risk for multiple countries in parallel.
-    
+
     :param grid_global: GeoDataFrame containing all country grids.
     :param output_dir: Directory to save the output files.
     :param select_tif_files_by_country: Function to retrieve available TIF files.
@@ -303,18 +336,24 @@ def process_multiple_countries(grid_global, output_dir, tif_path, max_workers=4,
         futures = {}
         for iso in iso3_list:
             out_path = os.path.join(output_dir, f"flood_risk_{iso}.csv")
-            
+
             # Check if output file exists before submitting
             if os.path.exists(out_path):
                 print(f"Skipping {iso}, output already exists: {out_path}")
                 continue
-            
+
             # Submit task to process the country
-            futures[executor.submit(process_and_save_flood_risk, 
-                                    iso=iso, grid_global=grid_global, 
-                                    tif_paths_adj=tif_path, 
-                                    output_dir=output_dir, 
-                                    parallel=parallel, n_jobs=n_jobs)] = iso
+            futures[
+                executor.submit(
+                    process_and_save_flood_risk,
+                    iso=iso,
+                    grid_global=grid_global,
+                    tif_paths_adj=tif_path,
+                    output_dir=output_dir,
+                    parallel=parallel,
+                    n_jobs=n_jobs,
+                )
+            ] = iso
 
         # Ensure all tasks complete and handle exceptions
         for future in futures:
@@ -324,23 +363,27 @@ def process_multiple_countries(grid_global, output_dir, tif_path, max_workers=4,
                 print(f"Error processing {futures[future]}: {e}")
 
 
-
-
-
 if __name__ == "__main__":
-
-    downloaded_dir_adj = '/data/big/fmoss/data/FloodRisk/tiles'
-    tif_paths_adj = [os.path.join(downloaded_dir_adj, filename) for filename in os.listdir(downloaded_dir_adj) if filename.endswith('_depth_reclass.tif')]
+    downloaded_dir_adj = "/data/big/fmoss/data/FloodRisk/tiles"
+    tif_paths_adj = [
+        os.path.join(downloaded_dir_adj, filename)
+        for filename in os.listdir(downloaded_dir_adj)
+        if filename.endswith("_depth_reclass.tif")
+    ]
 
     # Load global grid cells
-    grid_training = gpd.read_file("/home/fmoss/GLOBAL MODEL/data/GRID/grid_global.gpkg")
-    grid_world = gpd.read_file("/home/fmoss/GLOBAL MODEL/data/GRID/other_countries_grid.gpkg")
+    grid_training = gpd.read_file(
+        "/home/fmoss/GLOBAL MODEL/data/GRID/grid_global.gpkg"
+    )
+    grid_world = gpd.read_file(
+        "/home/fmoss/GLOBAL MODEL/data/GRID/other_countries_grid.gpkg"
+    )
     grid_global = pd.concat([grid_training, grid_world])
     # Define output directory
     output_dir = "/data/big/fmoss/data/FloodRisk/grid_data"
     # Get the unique country codes
     iso3_list = grid_global.iso3.unique()
     # Process country
-    process_multiple_countries(grid_global, output_dir, tif_paths_adj, max_workers=1, n_jobs=1)
-
-
+    process_multiple_countries(
+        grid_global, output_dir, tif_paths_adj, max_workers=1, n_jobs=1
+    )

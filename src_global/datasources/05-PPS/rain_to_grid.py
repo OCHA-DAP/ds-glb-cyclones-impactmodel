@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import datetime as dt
+import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import geopandas as gpd
@@ -8,57 +10,72 @@ import numpy as np
 import pandas as pd
 import rioxarray as rxr
 from shapely.geometry import Polygon
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src_global.utils import blob
 
-
-import logging
 # Set up logging
 log_file = "rainfall_processing.log"
-logging.basicConfig(filename=log_file, level=logging.INFO, 
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    filename=log_file,
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
 
 # Function to get date list based on metadata of events
 def get_date_list(df_meta, sid, DAYS_TO_LANDFALL=2):
     metadata = df_meta.loc[df_meta.sid == sid].copy()
     # Ensure 'landfalldate' is in datetime format
-    metadata.loc[:, 'landfalldate'] = pd.to_datetime(metadata['landfalldate'])
-    
+    metadata.loc[:, "landfalldate"] = pd.to_datetime(metadata["landfalldate"])
+
     # Calculate start and end dates
     start_date = metadata["landfalldate"] - dt.timedelta(days=DAYS_TO_LANDFALL)
     end_date = metadata["landfalldate"] + dt.timedelta(days=DAYS_TO_LANDFALL)
-    
+
     # Generate date list in the format Y-m-d
-    date_list = pd.date_range(start_date.iloc[0], end_date.iloc[0]).strftime("%Y-%m-%d").tolist()
-    
+    date_list = (
+        pd.date_range(start_date.iloc[0], end_date.iloc[0])
+        .strftime("%Y-%m-%d")
+        .tolist()
+    )
+
     return date_list
+
 
 # IMERG v7 database has information until 2003
 # IMERG v6 database has information from 2003
-def adjust_metadata_to_imerg_dates(metadata, DAYS_TO_LANDFALL=2, 
-                                   low_limit_date='2003-03-11',
-                                   high_limit_date=None):
-    
+def adjust_metadata_to_imerg_dates(
+    metadata,
+    DAYS_TO_LANDFALL=2,
+    low_limit_date="2003-03-11",
+    high_limit_date=None,
+):
     # Convert landfalldate to datetime format
-    metadata['landfalldate_dt'] = pd.to_datetime(metadata['landfalldate'])
+    metadata["landfalldate_dt"] = pd.to_datetime(metadata["landfalldate"])
     # Start date for gathering data
-    metadata['before_landfall'] = metadata["landfalldate_dt"] - dt.timedelta(days=DAYS_TO_LANDFALL)
-    metadata['after_landfall'] = metadata["landfalldate_dt"] + dt.timedelta(days=DAYS_TO_LANDFALL)
+    metadata["before_landfall"] = metadata["landfalldate_dt"] - dt.timedelta(
+        days=DAYS_TO_LANDFALL
+    )
+    metadata["after_landfall"] = metadata["landfalldate_dt"] + dt.timedelta(
+        days=DAYS_TO_LANDFALL
+    )
 
     # Define the threshold date
-    thres_date_low = dt.datetime.strptime(low_limit_date, '%Y-%m-%d').date()
+    thres_date_low = dt.datetime.strptime(low_limit_date, "%Y-%m-%d").date()
 
     metadata_reduced = metadata[
-        metadata['before_landfall'].dt.date >= thres_date_low
-        ].reset_index(drop=True)
+        metadata["before_landfall"].dt.date >= thres_date_low
+    ].reset_index(drop=True)
     # For setting upper thresholds
     if high_limit_date is not None:
-        thres_date_high = dt.datetime.strptime(high_limit_date, '%Y-%m-%d').date()
+        thres_date_high = dt.datetime.strptime(
+            high_limit_date, "%Y-%m-%d"
+        ).date()
         metadata_reduced = metadata_reduced[
-            metadata_reduced['after_landfall'].dt.date <= thres_date_high
-            ].reset_index(drop=True)
+            metadata_reduced["after_landfall"].dt.date <= thres_date_high
+        ].reset_index(drop=True)
     return metadata_reduced
+
 
 # Ajust geometries from countries that falls in the 0-meridian
 def adjust_longitude(polygon):
@@ -74,21 +91,19 @@ def adjust_longitude(polygon):
     # Create a new Polygon with adjusted coordinates
     return Polygon(coords)
 
+
 # PPS data to grid level
 container_client = blob.prod_container_client
-def create_rainfall_dataset(grid_global, df_meta, 
-                            iso3, sid, 
-                            version='v6'):
 
+
+def create_rainfall_dataset(grid_global, df_meta, iso3, sid, version="v6"):
     # Date list
-    date_list = get_date_list(df_meta=df_meta, 
-                               sid=sid, 
-                               DAYS_TO_LANDFALL=2)  
+    date_list = get_date_list(df_meta=df_meta, sid=sid, DAYS_TO_LANDFALL=2)
 
     # Get rasters
     raster_files = []
     for date in date_list:
-        blob_name = f'imerg/{version}/imerg-daily-late-{date}.tif'
+        blob_name = f"imerg/{version}/imerg-daily-late-{date}.tif"
         blob_client = container_client.get_blob_client(blob_name)
         cog_url = blob_client.url
         # Open raster
@@ -126,7 +141,7 @@ def create_rainfall_dataset(grid_global, df_meta,
             pixel_value = da_box.values[0, 0]  # Adjust indices if needed
             grid.at[index, "mean"] = pixel_value
 
-        grid["date"] = date_list[i]#.strftime("%Y-%m-%d")
+        grid["date"] = date_list[i]  # .strftime("%Y-%m-%d")
         # change values by dividing by 10 to mm/hr
         grid["mean"] /= 10
         file_df = pd.concat(
@@ -146,12 +161,14 @@ def create_rainfall_dataset(grid_global, df_meta,
     # Max accumulated rainfall in the period selected
     day_wide["rainfall_max_24h"] = day_wide.iloc[:, 2:].max(axis=1)
     day_wide["sid"] = sid
-    
+
     return day_wide[["id", "iso3", "sid", "rainfall_max_24h"]]
 
 
 # Iterate process
-def process_country_rainfall(iso3, metadata_global, grid_global, out_dir, imerg_version):
+def process_country_rainfall(
+    iso3, metadata_global, grid_global, out_dir, imerg_version
+):
     """Process rainfall dataset for a single country in parallel."""
     df_rainfall_total = pd.DataFrame()
     not_working_cases = pd.DataFrame()
@@ -159,7 +176,7 @@ def process_country_rainfall(iso3, metadata_global, grid_global, out_dir, imerg_
     logging.info(f"Processing country: {iso3}")
 
     # Skip if country data already exists
-    if os.path.exists(f'{out_dir}/rainfall_data_{iso3}.csv'):
+    if os.path.exists(f"{out_dir}/rainfall_data_{iso3}.csv"):
         logging.info(f"Skipping {iso3}: file already exists")
         return
 
@@ -170,33 +187,61 @@ def process_country_rainfall(iso3, metadata_global, grid_global, out_dir, imerg_
             df_meta = metadata_country[metadata_country.sid == sid]
             try:
                 df_rainfall = create_rainfall_dataset(
-                    grid_global=grid_global, df_meta=df_meta, 
-                    iso3=iso3, sid=sid, 
-                    version=imerg_version
+                    grid_global=grid_global,
+                    df_meta=df_meta,
+                    iso3=iso3,
+                    sid=sid,
+                    version=imerg_version,
                 )
                 df_rainfall = df_rainfall.fillna(0)
             except Exception as e:
                 logging.error(f"Failed to process {iso3}, {sid}: {e}")
-                not_working_case = pd.DataFrame([{'iso3': iso3, 'sid': sid}])
-                not_working_cases = pd.concat([not_working_cases, not_working_case])
+                not_working_case = pd.DataFrame([{"iso3": iso3, "sid": sid}])
+                not_working_cases = pd.concat(
+                    [not_working_cases, not_working_case]
+                )
                 df_rainfall = pd.DataFrame()
 
             df_rainfall_total = pd.concat([df_rainfall_total, df_rainfall])
 
         if not not_working_cases.empty:
-            not_working_cases.to_csv(f'{out_dir}/nodata_rainfall_{iso3}.csv', mode='a', header=False, index=False)
+            not_working_cases.to_csv(
+                f"{out_dir}/nodata_rainfall_{iso3}.csv",
+                mode="a",
+                header=False,
+                index=False,
+            )
 
-        df_rainfall_total.to_csv(f'{out_dir}/rainfall_data_{iso3}.csv', index=False)
+        df_rainfall_total.to_csv(
+            f"{out_dir}/rainfall_data_{iso3}.csv", index=False
+        )
     else:
         logging.info(f"{iso3} not present in metadata")
 
-def iterate_rainfall_dataset(iso3_list, metadata_global, grid_global, out_dir, imerg_version='v6', max_workers=4):
+
+def iterate_rainfall_dataset(
+    iso3_list,
+    metadata_global,
+    grid_global,
+    out_dir,
+    imerg_version="v6",
+    max_workers=4,
+):
     """Iterate over multiple countries using parallel processing."""
     os.makedirs(out_dir, exist_ok=True)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:  # Adjust workers as needed
+    with ThreadPoolExecutor(
+        max_workers=max_workers
+    ) as executor:  # Adjust workers as needed
         futures = {
-            executor.submit(process_country_rainfall, iso3, metadata_global, grid_global, out_dir, imerg_version): iso3
+            executor.submit(
+                process_country_rainfall,
+                iso3,
+                metadata_global,
+                grid_global,
+                out_dir,
+                imerg_version,
+            ): iso3
             for iso3 in iso3_list
         }
 
@@ -208,7 +253,6 @@ def iterate_rainfall_dataset(iso3_list, metadata_global, grid_global, out_dir, i
                 print(f"Error processing {iso3}: {e}")
 
 
-
 if __name__ == "__main__":
     # Set data path and out dir
     data_path = "/data/big/fmoss/data"
@@ -216,57 +260,55 @@ if __name__ == "__main__":
     # Load grid cells
     grid_global = gpd.read_file(
         f"{data_path}/GRID/merged/global_grid_land_overlap.gpkg"
-        )
-    grid_global.loc[:, 'iso3'] = grid_global.GID_0
+    )
+    grid_global.loc[:, "iso3"] = grid_global.GID_0
 
     # Apply the adjust_longitude function to each geometry in the DataFrame
     grid_global_transformed = grid_global.copy()
-    grid_global_transformed["geometry"] = grid_global_transformed["geometry"].apply(
-        adjust_longitude
-        )
+    grid_global_transformed["geometry"] = grid_global_transformed[
+        "geometry"
+    ].apply(adjust_longitude)
 
     # Load metadata (and clean DisNo. same-events cases)
     # It can happen that 2 events have the same sid and iso3 but different EM-DAT DisNo. code.
     # This is because multiple tracks of a same storms got reported affecitng differnet regions
     # Since the storms is still the same and the date range is also the same, rainfall data is going to be the same
     metadata_global = pd.read_csv(f"{data_path}/IBTRACS/merged/meta_data.csv")
-    metadata_global = metadata_global.drop('DisNo.', axis=1).drop_duplicates()
-    metadata_global.loc[:, 'iso3'] = metadata_global.GID_0
+    metadata_global = metadata_global.drop("DisNo.", axis=1).drop_duplicates()
+    metadata_global.loc[:, "iso3"] = metadata_global.GID_0
 
     # country list
     iso3_list = sorted(metadata_global.iso3.unique(), reverse=False)
-    # IMERG Late v7 only has information until 2003 
+    # IMERG Late v7 only has information until 2003
     metadata_global_reduced = adjust_metadata_to_imerg_dates(
-        metadata_global, 
+        metadata_global,
         DAYS_TO_LANDFALL=2,
-        low_limit_date='2000-06-01',
-        high_limit_date='2003-12-31'
-        )
-    print('Starting iteration for imerg v7')
+        low_limit_date="2000-06-01",
+        high_limit_date="2003-12-31",
+    )
+    print("Starting iteration for imerg v7")
     iterate_rainfall_dataset(
         iso3_list=iso3_list,
         metadata_global=metadata_global_reduced,
         grid_global=grid_global_transformed,
-        imerg_version='v7',
+        imerg_version="v7",
         out_dir=f"{out_dir}/imerg_v7",
-        max_workers=5
-        )
-    
-    # IMERG Late v6 only has information starting 2003 
+        max_workers=5,
+    )
+
+    # IMERG Late v6 only has information starting 2003
     metadata_global_reduced = adjust_metadata_to_imerg_dates(
-        metadata_global, 
+        metadata_global,
         DAYS_TO_LANDFALL=2,
-        low_limit_date='2003-03-11',
-        high_limit_date=None
-        )
-    print('Starting iteration for imerg v6')
+        low_limit_date="2003-03-11",
+        high_limit_date=None,
+    )
+    print("Starting iteration for imerg v6")
     iterate_rainfall_dataset(
         iso3_list=iso3_list,
         metadata_global=metadata_global_reduced,
         grid_global=grid_global_transformed,
-        imerg_version='v6',
+        imerg_version="v6",
         out_dir=f"{out_dir}/imerg_v6",
-        max_workers=5
-        )
-    
-
+        max_workers=5,
+    )

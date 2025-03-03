@@ -28,7 +28,8 @@ def windfield_to_grid(tc, tracks, grids):
             lambda point: point.distance(tc_track_line) * DEG_TO_KM
         )
         # Add to DF
-        df_to_add = pd.DataFrame({
+        df_to_add = pd.DataFrame(
+            {
                 "GID_0": grids["iso3"],
                 "typhoon_name": [tc_track.name] * npoints,
                 "typhoon_year": [int(tc_track.sid[:4])] * npoints,
@@ -37,7 +38,8 @@ def windfield_to_grid(tc, tracks, grids):
                 "wind_speed": windfield,
                 "track_distance": tc_track_distance,
                 "geometry": grids.geometry,
-            })
+            }
+        )
         df_windfield = pd.concat([df_windfield, df_to_add], ignore_index=True)
     return df_windfield
 

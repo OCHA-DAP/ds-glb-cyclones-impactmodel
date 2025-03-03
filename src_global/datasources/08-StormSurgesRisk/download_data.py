@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import os
-import requests
+
 import pandas as pd
+import requests
+
 
 # Download data
 def download_file(url, out_dir):
@@ -15,13 +17,15 @@ def download_file(url, out_dir):
     if response.status_code == 200:
         # Define the full path to save the file
         file_path = os.path.join(out_dir, "storm_surges_data.nc")
-        
+
         # Save the content to the file
         with open(file_path, "wb") as file:
             file.write(response.content)
         print(f"File downloaded successfully to {file_path}.")
     else:
-        print(f"Failed to download the file. Status code: {response.status_code}")
+        print(
+            f"Failed to download the file. Status code: {response.status_code}"
+        )
 
 
 if __main__ == "__main__":

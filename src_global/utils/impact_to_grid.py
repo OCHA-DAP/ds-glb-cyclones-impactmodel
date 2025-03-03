@@ -7,6 +7,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
+
 # Function to add population data to municipality info
 def add_pop_info_to_impact_data(
     iso3, global_ids_mun, global_pop, impact_global
@@ -174,11 +175,14 @@ def iterate_grid_impact(iso3_list, global_ids_mun, global_pop, impact_global):
 
 
 if __name__ == "__main__":
-
     # Load municipality info dataset
-    global_ids_mun = pd.read_csv("/data/big/fmoss/data/GRID/merged/global_grid_municipality_info.csv")
+    global_ids_mun = pd.read_csv(
+        "/data/big/fmoss/data/GRID/merged/global_grid_municipality_info.csv"
+    )
     # Load population dataset
-    global_pop = pd.read_csv("/data/big/fmoss/data/Worldpop/grid_data/merged/global_grid_worldpop.csv")
+    global_pop = pd.read_csv(
+        "/data/big/fmoss/data/Worldpop/grid_data/merged/global_grid_worldpop.csv"
+    )
     # Load impact data
     impact_global = pd.read_csv("/data/big/fmoss/data/EMDAT/impact_data.csv")
 
@@ -191,5 +195,7 @@ if __name__ == "__main__":
         impact_global=impact_global,
     )
     # Save data
-    impact_data_grid_global.to_csv("/data/big/fmoss/data/EMDAT/global_grid_impact_data.csv", ignore_index=True)
-
+    impact_data_grid_global.to_csv(
+        "/data/big/fmoss/data/EMDAT/global_grid_impact_data.csv",
+        ignore_index=True,
+    )

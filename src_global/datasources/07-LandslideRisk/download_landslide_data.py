@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 import os
+
 import requests
+
 
 def download_tif(url, out_path):
     """
     Downloads a TIFF file from a given URL and saves it to the specified path.
-    
+
     Parameters:
     - url (str): The URL of the TIFF file.
     - out_path (str): The local path where the file should be saved.
-    
+
     Returns:
     - bool: True if download was successful, False otherwise.
     """
@@ -18,12 +20,16 @@ def download_tif(url, out_path):
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
         # Send GET request
-        response = requests.get(url, stream=True, timeout=30)  # Use streaming to handle large files
+        response = requests.get(
+            url, stream=True, timeout=30
+        )  # Use streaming to handle large files
         response.raise_for_status()  # Raise error for HTTP issues (4xx, 5xx)
 
         # Write content to file in chunks
         with open(out_path, "wb") as file:
-            for chunk in response.iter_content(chunk_size=8192):  # 8KB per chunk
+            for chunk in response.iter_content(
+                chunk_size=8192
+            ):  # 8KB per chunk
                 file.write(chunk)
 
         print(f"Download successful: {out_path}")
@@ -32,6 +38,7 @@ def download_tif(url, out_path):
     except requests.exceptions.RequestException as e:
         print(f"Error downloading {url}: {e}")
         return False
+
 
 if __name__ == "__main__":
     # Set input

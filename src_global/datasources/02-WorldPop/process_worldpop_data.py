@@ -1,19 +1,18 @@
-
-from shapely.geometry import Polygon
-import rasterio
-from rasterio.mask import mask
-import geopandas as gpd
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-import logging
+import geopandas as gpd
+import rasterio
+from rasterio.mask import mask
+from shapely.geometry import Polygon
+
 # Configure logging
 logging.basicConfig(
     filename="process_worldpop_data.log",
     level=logging.ERROR,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
-
 
 
 # Define a function to adjust the longitude of a single polygon
@@ -29,6 +28,7 @@ def adjust_longitude(polygon):
     # Create a new Polygon with adjusted coordinates
     return Polygon(coords)
 
+
 # Function to calculate the sum of population for a given geometry
 def calculate_population(geometry, raster, transform):
     # Mask the raster with the geometry
@@ -40,6 +40,7 @@ def calculate_population(geometry, raster, transform):
         out_image > 0
     ].sum()  # Sum only positive values (valid population counts)
     return population_sum
+
 
 # Load and create population dataset for each country at grid level
 def pop_to_grid(grid, raster):
@@ -64,7 +65,7 @@ def iterate_pop_to_grid(grid, raster, out_folder, max_workers=4):
     logging.basicConfig(
         filename="process_tif_files.log",
         level=logging.ERROR,
-        format="%(asctime)s - %(levelname)s - %(message)s"
+        format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
     def process_country(iso):
@@ -91,18 +92,21 @@ def iterate_pop_to_grid(grid, raster, out_folder, max_workers=4):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(process_country, iso3_list))
 
+
 if __name__ == "__main__":
     # Load Population raster
-    raster_path  = "/data/big/fmoss/data/Worldpop/ppp_2020_1km_Aggregated.tif"
+    raster_path = "/data/big/fmoss/data/Worldpop/ppp_2020_1km_Aggregated.tif"
     pop_raster = rasterio.open(raster_path)
 
     # Load grid cells
-    grid = gpd.read_file("/data/big/fmoss/data/GRID/merged/global_grid_land_overlap.gpkg")
-    grid['iso3'] = grid['GID_0']
-    grid['geometry'] = grid['geometry'].apply(adjust_longitude)
+    grid = gpd.read_file(
+        "/data/big/fmoss/data/GRID/merged/global_grid_land_overlap.gpkg"
+    )
+    grid["iso3"] = grid["GID_0"]
+    grid["geometry"] = grid["geometry"].apply(adjust_longitude)
 
     # Output
     out_folder = "/data/big/fmoss/data/Worldpop/grid_data"
-    
+
     # Population data to grid level
     iterate_pop_to_grid(grid, pop_raster, out_folder)

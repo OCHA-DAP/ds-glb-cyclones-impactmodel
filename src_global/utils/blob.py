@@ -10,16 +10,15 @@ from typing import Literal
 import geopandas as gpd
 import pandas as pd
 from azure.storage.blob import ContainerClient
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 from rasterio.io import MemoryFile
-
 
 load_dotenv(find_dotenv(), override=True)
 
 # Dev client for monitoring
 DEV_BLOB_SAS_GLOBAL = os.getenv("DEV_BLOB_SAS_GLOBAL")
-#DEV_BLOB_SAS_GLOBAL="sv=2023-11-03&st=2024-07-09T10%3A43%3A09Z&se=2034-01-01T11%3A43%3A00Z&sr=c&sp=rl&sig=ccRWCnsD%2BzXy3p7%2F4lURGtB%2BMc4pPcgIX0YXHjFLsB4%3D"
-DEV_BLOB_SAS_GLOBAL="sp=rl&st=2025-02-20T15:08:29Z&se=2026-02-18T23:08:29Z&spr=https&sv=2022-11-02&sr=c&sig=p7h63HIY19505ah2S5PboshvMGTGpJ4ia5AM%2Bzk2p6E%3D"
+# DEV_BLOB_SAS_GLOBAL="sv=2023-11-03&st=2024-07-09T10%3A43%3A09Z&se=2034-01-01T11%3A43%3A00Z&sr=c&sp=rl&sig=ccRWCnsD%2BzXy3p7%2F4lURGtB%2BMc4pPcgIX0YXHjFLsB4%3D"
+DEV_BLOB_SAS_GLOBAL = "sp=rl&st=2025-02-20T15:08:29Z&se=2026-02-18T23:08:29Z&spr=https&sv=2022-11-02&sr=c&sig=p7h63HIY19505ah2S5PboshvMGTGpJ4ia5AM%2Bzk2p6E%3D"
 DEV_BLOB_BASE_GLOBAL_URL = "https://imb0chd0dev.blob.core.windows.net/"
 DEV_BLOB_PROJ_BASE_GLOBAL_URL = DEV_BLOB_BASE_GLOBAL_URL + "global"
 DEV_BLOB_PROJ_GLOBAL_URL = (
@@ -191,7 +190,8 @@ def get_impact_data_at_grid_level(weather_constraints=False):
     if weather_constraints:
         # Load impact data (is in chunks)
         filenames = [
-            f"impact_data_grid_global_weather_constraints_part_{i}.csv" for i in range(1, 193)
+            f"impact_data_grid_global_weather_constraints_part_{i}.csv"
+            for i in range(1, 193)
         ]
     elif weather_constraints == False:
         # Load impact data (is in chunks)

@@ -9,9 +9,9 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 
+
 # Function to load and clean emdat dataset
 def clean_emdat(impact_data):
-
     impact_data_global = (
         impact_data[
             [
@@ -204,7 +204,9 @@ def add_missing_sid(df_impact):
 # Function to geolocate the emdat database (GID codes by GDAM shapefile)
 def geolocate_impact(impact_data, GID_shapefile, GUIL_shapefile):
     global_shp = GID_shapefile
-    guil_shp = GUIL_shapefile[["ADM2_CODE", "ADM1_CODE", "ADM0_NAME", "geometry"]]
+    guil_shp = GUIL_shapefile[
+        ["ADM2_CODE", "ADM1_CODE", "ADM0_NAME", "geometry"]
+    ]
 
     # Create "affected regions" column
     impact_data[["level", "regions_affected"]] = impact_data[
@@ -352,11 +354,15 @@ def geolocate_impact(impact_data, GID_shapefile, GUIL_shapefile):
 
 if __name__ == "__main__":
     # Clean EMDAT dataset
-    emdat_data = pd.read_csv("/home/fmoss/GLOBAL MODEL/data/EMDAT/emdat-tropicalcyclone-2000-2022-processed-sids.csv")
+    emdat_data = pd.read_csv(
+        "/home/fmoss/GLOBAL MODEL/data/EMDAT/emdat-tropicalcyclone-2000-2022-processed-sids.csv"
+    )
     impact_data = clean_emdat(emdat_data)
     # Create impact dataset at adm2 level for event
     GID_shapefile = gpd.read_file("/data/big/fmoss/data/SHP/GADM_adm2.gpkg")
-    GUIL_shapefile = gpd.read_file("/data/big/fmoss/data/SHP/global_shapefile_GUIL_adm2.gpkg")
+    GUIL_shapefile = gpd.read_file(
+        "/data/big/fmoss/data/SHP/global_shapefile_GUIL_adm2.gpkg"
+    )
     df_impact = geolocate_impact(impact_data, GID_shapefile, GUIL_shapefile)
     out_path = "/data/big/fmoss/data/EMDAT/impact_data.csv"
     os.makedirs("/data/big/fmoss/data/EMDAT", exist_ok=True)
